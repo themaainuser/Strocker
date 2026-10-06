@@ -6,7 +6,7 @@ window.SUMI = window.SUMI || {};
   S.LAYER_NAMES = ['wash', 'scene', 'ink', 'fx'];
   const ALL = [...S.LAYER_NAMES, 'mask'];
   const MASK_TINT = 'rgba(220,40,40,0.35)';
-  const GRANULATION = 0.35; // how much pigment the granulation tile lifts out of washes
+  const GRANULATION = 0.22; // how much pigment the granulation tile lifts out of washes
 
   function makeCanvas(w, h) {
     const c = document.createElement('canvas');
@@ -21,14 +21,14 @@ window.SUMI = window.SUMI || {};
     const N = 256, noise = S.makeNoise(7), rng = S.makeRng('granulation');
     tile = makeCanvas(N, N);
     const ctx = tile.getContext('2d'), img = ctx.createImageData(N, N);
-    const f = (x, y) => noise.fbm2(x / 6, y / 6, 3);
+    const f = (x, y) => noise.fbm2(x / 3, y / 3, 3);
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       // blend four offset samples so the tile wraps without seams
       const v = (f(x, y) * (N - x) * (N - y) + f(x - N, y) * x * (N - y) +
                  f(x - N, y - N) * x * y + f(x, y - N) * (N - x) * y) / (N * N);
-      const t = Math.min(1, Math.max(0, (v - 0.48) / 0.12));
+      const t = Math.min(1, Math.max(0, (v - 0.45) / 0.3));
       const speck = rng.next();
-      const a = Math.min(1, 0.7 * t * t * (3 - 2 * t) + (speck > 0.85 ? 0.5 * speck : 0));
+      const a = Math.min(1, 0.35 * t * t * (3 - 2 * t) + (speck > 0.8 ? 0.4 * speck : 0));
       img.data[(y * N + x) * 4 + 3] = Math.round(a * 255);
     }
     ctx.putImageData(img, 0, 0);

@@ -168,7 +168,7 @@ window.SUMI = window.SUMI || {};
     const skies = rng.int(4, 7);
     for (let i = 0; i < skies; i++) {
       wash(ctx, rng, box.x + box.w * rng.range(0.1, 0.9), box.y + box.h * rng.range(0.05, 0.55),
-        Math.max(8, box.w * rng.range(0.2, 0.35)), 16, GREY, 0.45);
+        Math.max(8, box.w * rng.range(0.15, 0.28)), 16, GREY, 0.25);
     }
     const bridge = scene.bridgeGeometry(box, rng);
 

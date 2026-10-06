@@ -7,14 +7,15 @@ window.SUMI = window.SUMI || {};
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const r0 = v => Math.round(v);
 
-  // temporary figure-ish silhouette: a column of soft ellipses (never stored in the mask layer)
+  // temporary figure-ish silhouette (never stored in the mask layer)
   S.autoMask = (rng, layers, wind) => {
     const c = document.createElement('canvas');
     c.width = Math.round(layers.w * layers.dpr); c.height = Math.round(layers.h * layers.dpr);
     const ctx = c.getContext('2d'), W = layers.w, H = layers.h, m = Math.min(W, H);
     ctx.setTransform(layers.dpr, 0, 0, layers.dpr, 0, 0);
-    const top = { x: W * rng.range(0.35, 0.5), y: H * 0.08 }, bot = { x: W * rng.range(0.3, 0.55), y: H * 0.92 };
-    const n = rng.int(3, 5);
+    // a broad drape leaning across the wind, built from a few large soft ellipses
+    const top = { x: W * rng.range(0.38, 0.5), y: H * 0.1 }, bot = { x: W * rng.range(0.4, 0.55), y: H * 0.85 };
+    const n = rng.int(3, 4);
     const blob = (x, y, rx, ry, rot) => {
       ctx.save();
       ctx.translate(x, y); ctx.rotate(rot); ctx.scale(1, ry / rx);
@@ -25,13 +26,10 @@ window.SUMI = window.SUMI || {};
       ctx.restore();
     };
     for (let i = 0; i < n; i++) {
-      const t = (i + 0.5) / n, rx = m * rng.range(0.1, 0.18);
+      const t = (i + 0.5) / n, rx = m * rng.range(0.16, 0.24);
       blob(top.x + (bot.x - top.x) * t + rng.gauss() * m * 0.03, top.y + (bot.y - top.y) * t,
-        rx, rx * rng.range(1.3, 2), rng.range(-0.4, 0.4));
+        rx, rx * rng.range(1.1, 1.6), wind + Math.PI / 2 + rng.range(-0.35, 0.35));
     }
-    // a raised "arm" reaching along the wind
-    const ax = top.x + Math.cos(wind) * m * 0.12, ay = top.y + H * 0.12 + Math.sin(wind) * m * 0.12;
-    blob(ax, ay, m * rng.range(0.05, 0.08), m * rng.range(0.15, 0.25), wind + Math.PI / 2);
     return c;
   };
 
@@ -80,14 +78,14 @@ window.SUMI = window.SUMI || {};
       for (let i = 0; i < blobs; i++) {
         const a = rng.range(-0.3, 0.3) * D, p = rng.gauss() * D * 0.06;
         S.ink.washBlob(ctxOf('wash'), rng, c.x + u.x * a + n.x * p, c.y + u.y * a + n.y * p,
-          D * rng.range(0.08, 0.16), 30, { color: GREY, opacity: 0.5 });
+          D * rng.range(0.06, 0.12), 24, { color: GREY, opacity: 0.22 });
         yield;
       }
       onLog(`wash.mist({ blobs: ${blobs} })`);
     }
 
     function* sceneStep() {
-      const g = sceneInto(layers, rng, noise, ctx.mask, ctx.box, rng.range(10, 24));
+      const g = sceneInto(layers, rng, noise, ctx.mask, ctx.box, rng.range(18, 40));
       onLog(`scene.bridge({ towers: ${g.bridge.towers.length}, vp: [${r0(g.bridge.vp.x)}, ${r0(g.bridge.vp.y)}] })`);
       onLog(`scene.pylons({ count: ${g.pylons.length} })`);
     }
@@ -103,8 +101,8 @@ window.SUMI = window.SUMI || {};
       ctx.slashes = [];
       for (let i = 0; i < count; i++) {
         const hero = i < heroes;
-        const wMax = (hero ? rng.range(80, 110) : rng.range(20, 70)) * k;
-        const len = D * rng.range(0.2, 0.6), ang = wind + rng.range(-10, 10) * Math.PI / 180;
+        const wMax = (hero ? rng.range(110, 160) : rng.range(30, 90)) * k;
+        const len = D * rng.range(0.3, 0.7), ang = wind + rng.range(-10, 10) * Math.PI / 180;
         const off = rng.gauss() * D * 0.08, along = rng.range(-0.25, 0.05) * D;
         const p0 = { x: ctx.centre.x + n.x * off + u.x * along, y: ctx.centre.y + n.y * off + u.y * along };
         const p2 = { x: p0.x + Math.cos(ang) * len, y: p0.y + Math.sin(ang) * len };
@@ -117,7 +115,8 @@ window.SUMI = window.SUMI || {};
           x: (1 - t) * (1 - t) * p0.x + 2 * (1 - t) * t * p1.x + t * t * p2.x,
           y: (1 - t) * (1 - t) * p0.y + 2 * (1 - t) * t * p1.y + t * t * p2.y,
         });
-        const width = t => wMax * (1 - 0.7 * Math.pow(t, 1.5));
+        // short attack so the brush lands tapered, then thins out as it speeds up
+        const width = t => wMax * Math.min(1, 0.6 + t / 0.05) * (1 - 0.45 * Math.pow(t, 1.5));
         const steps = Math.max(2, Math.ceil(len / 3));
         S.brushes.dry.start(st, p0);
         let prev = p0;
@@ -169,7 +168,7 @@ window.SUMI = window.SUMI || {};
         const a = rng.range(-0.4, 0.4) * D, p = rng.gauss() * D * 0.1;
         const near = 1 - 0.5 * Math.min(1, Math.abs(p) / (D * 0.15));
         S.ink.shard(ctxOf('fx'), rng, ctx.centre.x + u.x * a + n.x * p, ctx.centre.y + u.y * a + n.y * p,
-          rng.range(14, 60) * k * near, wind + rng.gauss() * 0.2, o);
+          rng.range(24, 80) * k * near, wind + rng.gauss() * 0.2, o);
         if (i % 4 === 3) yield;
       }
       onLog(`shard.scatter({ n: ${count} })`);

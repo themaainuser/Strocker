@@ -1,31 +1,73 @@
-# SUMI Console — ink strokes in vanilla JS
+# SUMI Console — ink posters in vanilla JS
 
-Interactive playground for the ink / sumi-e effects in your reference
-(dry-brush slashes, splatter spray, thin scratch lines, grey wash bleed, torn-paper shards).
+Generate and paint "ECLIPSE"-style ink graphics: a figure silhouette filled with a
+grey-blue double exposure (suspension bridge, power pylons, mist), cut by dry-brush
+slashes, directional spray, torn-paper shards and speed lines.
 
-No libraries. Canvas2D only. Open `index.html` in a browser.
+No libraries, no build step. Canvas2D only. Open `index.html` by double-click, or serve
+the folder (`npx serve .` / `python -m http.server`).
 
-## Run
+## Generate a poster
 
-```bat
-cd ink-strokes-console
-start index.html
-:: or: npx serve .
+1. Type a seed (any word) or press **⟳ Reroll** for a random one.
+2. Press **✦ Generate**. It paints step by step. Press it again to cancel.
+3. The same seed, mask and window size always give the same picture.
+
+| Control | What it does |
+|---|---|
+| Wind | Angle of the slashes, spray and speed lines (−80…80°, default −35° = lower-left → upper-right) |
+| Ink mask edge | Traces the silhouette outline and its inner folds in fine, broken ink |
+| Fill mask | Puts only the bridge/pylon scene into your painted mask, so you can add the ink by hand |
+| Clear mask | Removes the painted silhouette |
+
+### Your own figure (painted mask)
+
+Press `7` (Mask) and paint the silhouette. It shows as a red tint only while the Mask
+tool is active, and it is never exported. Hold `Alt` to erase. Then **Generate**, or
+**Fill mask** and paint the rest yourself. With no mask painted, Generate makes a
+temporary drape-shaped one from the seed.
+
+## Brushes
+
+| Key | Brush | How it works |
+|---|---|---|
+| 1 | Dry brush | Fixed bristles per stroke, each with its own offset, ink load and touch-down point, so streaks stay continuous. Ink runs out with distance, so the tail breaks into dry streaks. Fast strokes get thinner, lighter and drier. |
+| 2 | Spray | Droplets thrown in a cone along the stroke direction. Far drops streak, a few get tails, plus a fine stipple mist. |
+| 3 | Fine line | Smoothed continuous pen for figure outlines (fast = thin). |
+| 4 | Speed lines | Drag a rubber band; on release, one long tapered hairline, snapped to the wind if within 20°. |
+| 5 | Wash | Watercolour: many faint, re-deformed polygons stacked on top of each other. Edges darken, and pigment granulates on the paper. |
+| 6 | Shard | Torn-paper chips with jagged edges, a shaded fold and a partial ink outline. |
+| 7 | Mask | Paints the silhouette (`Alt` erases). |
+
+Shortcuts: `1–7` brush · `[` `]` size · `Ctrl+Z` undo (15 steps). Shortcuts are ignored
+while typing in the seed field. **↓ PNG** exports paper, all paint layers, grain and the stamp.
+
+## Files
+
+```
+index.html        UI markup, loads the scripts below in order
+app.js            UI, pointer input, undo, render loop (SUMI.app)
+js/rng.js         seeded RNG + value noise — every random draw goes through here
+js/layers.js      offscreen layers (wash, scene, ink, fx, mask), compositing, export
+js/brushes.js     the seven brushes + ink helpers (spray, wash, shard, speed line)
+js/contour.js     mask → marching-squares outline → inked edge and folds
+js/scene.js       bridge / pylon geometry, scene painting, mask clip
+js/generator.js   the poster recipe, auto-mask, fill mask
+tests.html        in-browser test page (open it directly to see results)
+tests/run.mjs     headless runner
 ```
 
-## Brushes (`app.js`)
+All files are classic scripts on a `window.SUMI` namespace (no ES modules), so the page
+works from `file://`.
 
-| Brush | How it works (JS only) |
-|---|---|
-| Dry Brush | 5–44 bristle sub-strokes per segment, perpendicular offsets, `dryness` = skip probability → white gaps. Velocity thins the stroke (`taper`). |
-| Splatter | `pow(random,1.7)` radial distribution + 2–3 blot cores + elliptical dots |
-| Scratch | 1px quadratic wobble + faint echo line |
-| Wash | 16 radial-gradient blobs with `multiply` composite + uneven bleed ring |
-| Shard | random 3–5-gon, paper-colour fill + ink outline (the white chips in the ref) |
+## Tests
 
-Paper grain is procedural too: speckles + 70 fibre lines.
+```bash
+node tests/run.mjs
+```
 
-## Try the reference look
-
-1. Click **✦ Demo** — paints washes → slashes → splatter → scratches → shards.
-2. Then paint over it: big `Dry Brush` size ~64, `Splatter` 80 for the spray, `Wash` with bleed 70 for mist.
+The runner opens `tests.html` in headless Edge or Chrome (set `SUMI_BROWSER` to pick
+another Chromium-based browser) and prints failures plus a summary. Exit code 1 means
+a failure. The tests cover the RNG and noise, layers, every brush, contour tracing,
+scene geometry, generator determinism and cancel, and app smoke tests that drive
+`index.html` in an iframe.

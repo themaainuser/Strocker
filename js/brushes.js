@@ -33,8 +33,8 @@ window.SUMI = window.SUMI || {};
       const a = dir + rng.gauss() * 0.5;
       const d = Math.pow(rng.next(), 1.4) * reach;
       const px = x + Math.cos(a) * d, py = y + Math.sin(a) * d;
-      const s = Math.pow(rng.next(), 3) * radius * 0.12 + 0.3;
-      const stretch = 1 + 1.8 * d / reach; // far drops streak along their flight
+      const s = Math.pow(rng.next(), 3.5) * radius * 0.09 + 0.3;
+      const stretch = 1 + 1.2 * d / reach * (s < 2 ? 1 : 0.35); // small far drops streak along their flight
       if (bleed01 > 0.05 && s > 1.6 && i % 2 === 0) {
         const hr = s * (2 + bleed01 * 3.5);
         const g = ctx.createRadialGradient(px, py, 0, px, py, hr);
@@ -55,18 +55,18 @@ window.SUMI = window.SUMI || {};
     }
     // blot cores for heavy throws
     if (amount > 0.4) {
-      const blots = rng.int(1, 2);
+      const blots = rng.chance(amount) ? 1 : 0;
       for (let i = 0; i < blots; i++) {
         const d = rng.range(0.2, 0.8) * radius, a = dir + rng.gauss() * 0.3;
         ctx.fillStyle = ink.rgba(col, op * rng.range(0.6, 0.9));
         ctx.beginPath();
         ctx.ellipse(x + Math.cos(a) * d, y + Math.sin(a) * d,
-          rng.range(0.15, 0.3) * radius * 1.6, rng.range(0.15, 0.3) * radius * 0.7, a, 0, TAU);
+          rng.range(0.08, 0.18) * radius, rng.range(0.08, 0.18) * radius * 0.8, a, 0, TAU);
         ctx.fill();
       }
     }
     // micro-mist
-    const mist = Math.floor(30 + 120 * amount);
+    const mist = Math.floor(60 + 260 * amount);
     for (let i = 0; i < mist; i++) {
       const a = dir + rng.gauss() * 0.9, d = Math.pow(rng.next(), 0.8) * reach * 1.2;
       ctx.fillStyle = ink.rgba(col, op * rng.range(0.3, 0.8));
@@ -194,6 +194,8 @@ window.SUMI = window.SUMI || {};
     ctx.shadowColor = 'rgba(0,0,0,0.12)'; ctx.shadowBlur = 3; ctx.shadowOffsetY = 1;
     ctx.fillStyle = S.PAPER || '#f4f1ea';
     ctx.fill(path);
+    ctx.fillStyle = 'rgba(150,160,170,0.16)';
+    ctx.fill(path);
     ctx.shadowColor = 'transparent';
     // fold: shade one side of a line through the shard
     const fa = rot + rng.range(0.6, 2.5), fx = x + rng.range(-0.3, 0.3) * rx, fy = y + rng.range(-0.3, 0.3) * rx;
@@ -292,8 +294,9 @@ window.SUMI = window.SUMI || {};
       const o = st.opts, r = st.rng;
       const n = clamp(Math.round(o.size / 1.6), 8, 64);
       st.bristles = Array.from({ length: n }, () => ({
-        t: clamp(r.gauss() * 0.33, -0.5, 0.5), wf: r.range(0.6, 1.4),
+        t: clamp(r.gauss() * 0.33, -0.5, 0.5), wf: r.range(0.5, 2.2),
         load: r.range(0.75, 1), off: r.range(0, 1000), last: null,
+        delay: Math.pow(r.next(), 2) * o.size * 0.6, // bristles touch down unevenly → ragged start
       }));
       st.arc = 0;
       st.budget = 900 * (1 - 0.6 * o.dryness);
@@ -307,17 +310,17 @@ window.SUMI = window.SUMI || {};
       const nx = -dy / len, ny = dx / len;
       ctx.lineCap = 'round';
       if (o.bleed > 2) { // ink soaking under the bristles
-        ctx.strokeStyle = ink.rgba(o.color, o.opacity * 0.14 * bleed01);
+        ctx.strokeStyle = ink.rgba(o.color, o.opacity * 0.08 * bleed01);
         ctx.lineWidth = w * (0.45 + 0.9 * bleed01);
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
       }
       const dry = Math.min(0.95, o.dryness + o.taper * 0.35 * st.speed);
-      const bw = Math.max(0.6, w / st.bristles.length * 1.6);
+      const bw = Math.max(0.6, w / st.bristles.length * 2.4);
       for (const br of st.bristles) {
         const px = b.x + nx * br.t * w, py = b.y + ny * br.t * w;
         if (!br.last) br.last = { x: a.x + nx * br.t * w, y: a.y + ny * br.t * w };
-        const thresh = dry * 0.55 + Math.abs(br.t) * 2 * 0.25 + (1 - inkLeft) * 0.6;
-        if (st.noise.n1(st.arc * 0.035 + br.off) > thresh) {
+        const thresh = dry * 0.45 + Math.abs(br.t) * 2 * 0.35 + (1 - inkLeft) * 0.6;
+        if (st.arc >= br.delay && st.noise.n1(st.arc * 0.035 + br.off) > thresh) {
           ctx.strokeStyle = ink.rgba(o.color, o.opacity * br.load * (0.55 + 0.45 * inkLeft));
           ctx.lineWidth = br.wf * bw;
           ctx.beginPath(); ctx.moveTo(br.last.x, br.last.y); ctx.lineTo(px, py); ctx.stroke();
