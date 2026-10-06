@@ -4,7 +4,7 @@
 // animated replay ends pixel-identical to the live drawing at any speed.
 // Depends on rng.js + brushes.js + recorder.js.
 window.SUMI = window.SUMI || {};
-(function (S) {
+(function sumiPlayback(S) {
   const finite = v => typeof v === 'number' && Number.isFinite(v);
 
   function brushFor(tool) {
@@ -125,4 +125,6 @@ window.SUMI = window.SUMI || {};
       finish() { if (state === 'running') { tl.seek(Infinity); report(); settle(true); } }, // jump to the end
     };
   };
+  // export.js inlines this function's own source into standalone HTML files
+  (S.modules || (S.modules = {})).playback = sumiPlayback;
 })(window.SUMI);

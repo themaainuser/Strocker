@@ -1,7 +1,7 @@
 // Seeded randomness. Every brush, scene and generator draw goes through
 // these so the same seed always paints the same picture.
 window.SUMI = window.SUMI || {};
-(function (S) {
+(function sumiRng(S) {
   // FNV-1a over the seed's string form, then a murmur3 finalizer for avalanche
   S.hashSeed = function (seed) {
     const str = String(seed);
@@ -64,4 +64,6 @@ window.SUMI = window.SUMI || {};
     }
     return { n1, n2, fbm2 };
   };
+  // export.js inlines this function's own source into standalone HTML files
+  (S.modules || (S.modules = {})).rng = sumiRng;
 })(window.SUMI);

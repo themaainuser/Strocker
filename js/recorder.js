@@ -14,7 +14,7 @@
 // both canvases with getContext('2d', { willReadFrequently: true }) (CPU). GPU canvases
 // antialias differently, and the browser may move a GPU canvas to the CPU after readbacks.
 window.SUMI = window.SUMI || {};
-(function (S) {
+(function sumiRecorder(S) {
   S.STROKE_FORMAT = 1;
 
   const finite = v => typeof v === 'number' && Number.isFinite(v);
@@ -83,4 +83,6 @@ window.SUMI = window.SUMI || {};
     };
   };
   // replaying lives in playback.js: SUMI.replayStroke / SUMI.playback / SUMI.replay
+  // export.js inlines this function's own source into standalone HTML files
+  (S.modules || (S.modules = {})).recorder = sumiRecorder;
 })(window.SUMI);

@@ -7,7 +7,7 @@
 //   ctx's transform/clip. Every other ctx property is reset on entry and restored on exit.
 // - The ink.* helpers keep the caller's globalAlpha too; brushes set it from st.alpha.
 window.SUMI = window.SUMI || {};
-(function (S) {
+(function sumiBrushes(S) {
   S.DEFAULT_WIND = -35 * Math.PI / 180; // lower-left → upper-right, like the reference slashes
 
   S.defaultOpts = () => ({ size: 34, opacity: 0.85, dryness: 0.55, splatter: 40, bleed: 35, taper: 0.65, color: '#111318' });
@@ -541,4 +541,6 @@ window.SUMI = window.SUMI || {};
   }
   S.brushes = {};
   for (const name of Object.keys(raw)) S.brushes[name] = guard(raw[name]);
+  // export.js inlines this function's own source into standalone HTML files
+  (S.modules || (S.modules = {})).brushes = sumiBrushes;
 })(window.SUMI);
