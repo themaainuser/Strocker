@@ -70,6 +70,22 @@
       <div class="ctl"><div class="ctl-head"><label>Grain <i>paper texture</i></label><b id="v-grain">60</b></div><input type="range" id="s-grain" min="0" max="100" value="60" /></div>
     </div>
 
+    <div class="section replay">
+      <label class="section-title" for="replaySpeed">Replay — your recorded strokes</label>
+      <div class="row btn-row">
+        <select id="replaySpeed" aria-label="Replay speed">
+          <option value="0.5">0.5×</option><option value="1" selected>1×</option>
+          <option value="2">2×</option><option value="4">4×</option><option value="8">8×</option>
+        </select>
+        <select id="replayTiming" aria-label="Replay timing">
+          <option value="recorded" selected>as drawn</option>
+          <option value="sequence">back to back</option>
+          <option value="overlap">all at once</option>
+        </select>
+      </div>
+      <button id="btnReplay" class="ghost wide" disabled>▶ Replay</button>
+    </div>
+
     <div class="section">
       <label class="section-title">Paper & canvas</label>
       <div class="row btn-row">
@@ -103,6 +119,7 @@
 <script src="js/layers.js"></script>
 <script src="js/brushes.js"></script>
 <script src="js/recorder.js"></script>
+<script src="js/playback.js"></script>
 <script src="js/contour.js"></script>
 <script src="js/scene.js"></script>
 <script src="js/generator.js"></script>

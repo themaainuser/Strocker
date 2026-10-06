@@ -44,10 +44,14 @@ What a host app or a recorder can rely on:
 
 ## To build next
 
-Status: **1** and **4** are built on branch `feat/stroke-recorder`: `js/recorder.js` with
-`SUMI.recordStroke` (a pen: `dab` / `segment` / `end`) and `SUMI.replayStroke`. The app
-records every hand stroke, and the recording follows Undo, Clear, Clear mask and Generate.
-**2** and **3** are next.
+Status on branch `feat/stroke-recorder`:
+- **1 and 4 are built.** `js/recorder.js` has `SUMI.recordStroke` (a pen: `dab` /
+  `segment` / `end`). The app records every hand stroke, and the recording follows Undo,
+  Clear, Clear mask and Generate.
+- **2 is built.** `js/playback.js` has `SUMI.playback` (time-ordered timeline with
+  forward-only `seek`), `SUMI.replay` (animated: speed, `cancel`, `finish`) and
+  `SUMI.replayStroke`. The app has a Replay control with speed and timing pickers.
+- **3 (export) is next.**
 
 1. **Stroke recorder.**
    - **Per stroke:** `v` (format version), `tool`, the raw seed exactly as passed (number or
@@ -70,6 +74,20 @@ records every hand stroke, and the recording follows Undo, Clear, Clear mask and
      by thousands of pixels. Playback speed only changes when each recorded call happens.
    - **Overlapping strokes** are fine visually. They are pixel-identical only when calls
      are applied in the recorded global order (by `t`).
+   - **As built:** every call sits on one timeline sorted by `t0 + t`, with ties kept in
+     recorded order. Each animation frame only decides how far along that fixed order to
+     go. Verified in the live browser: a 7-stroke recording animated at 2× (1,265 calls)
+     ended byte-identical to the instant replay.
+   - **Timing modes:**
+     - `recorded`: keeps the pauses.
+     - `sequence`: back to back, plus a `gap`.
+     - `overlap`: starts staggered by `stagger`. Interleaves calls, so crossing strokes
+       can differ.
+   - **Known limit:** after a window resize the app stretches the existing bitmap, but
+     records keep their original coordinates (`stroke.canvas` stores the size). A replay
+     after a resize therefore draws at the recorded positions and won't line up with the
+     stretched picture. A fix for later: repaint from the recording on resize instead of
+     stretching.
 3. **Export as code.**
    - JSON stroke data.
    - A standalone HTML file (`rng.js` + `brushes.js` + strokes + a playback loop) that

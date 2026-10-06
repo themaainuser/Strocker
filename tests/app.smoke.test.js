@@ -61,3 +61,28 @@ T.test('app: recording follows undo, clear, clear mask and generate', async () =
   a.w.document.getElementById('btnClear').click(); T.eq(tools(), '', 'clear empties the recording');
   a.app.undo(); T.eq(tools(), 'mask', 'undo brings it back');
 });
+T.test('app: replay repaints the recording exactly and is undoable', async () => {
+  const a = await app(), L = a.app.layers, names = ['wash', 'ink', 'fx', 'mask'];
+  const hashes = () => names.map(n => T.hash(L.get(n).canvas)).join();
+  a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
+  a.app.setTool('wash'); drag(a, line(150, 200, 400, 420));
+  const before = hashes(), depth = a.app.undoDepth();
+  T.eq(await a.app.replay({ speed: Infinity }).done, true);
+  T.eq(hashes(), before); T.eq(a.app.undoDepth(), depth + 1, 'one undo step'); T.assert(!a.app.busy);
+});
+T.test('app: stopping an animated replay jumps to the end', async () => {
+  const a = await app(); a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
+  const before = T.hash(a.app.layers.get('ink').canvas);
+  const run = a.app.replay({ speed: 1 }); T.assert(a.app.busy, 'busy while replaying');
+  a.w.document.getElementById('btnReplay').click(); // reads "Stop" while busy
+  T.eq(await run.done, true); T.assert(!a.app.busy, 'idle again');
+  T.eq(T.hash(a.app.layers.get('ink').canvas), before, 'canvas matches the recording');
+});
+T.test('app: replay needs a recording; its pickers do not steal hotkeys', async () => {
+  const a = await app(), btn = a.w.document.getElementById('btnReplay');
+  T.assert(btn.disabled, 'disabled with nothing recorded');
+  a.app.setTool('dry'); drag(a, line(100, 400, 300, 300)); T.assert(!btn.disabled, 'enabled after a stroke');
+  a.app.undo(); T.assert(btn.disabled, 'disabled again after undo');
+  const sel = a.w.document.getElementById('replaySpeed'); sel.focus();
+  sel.dispatchEvent(new a.w.KeyboardEvent('keydown', { key: '3', bubbles: true })); T.eq(a.app.S.tool, 'dry');
+});

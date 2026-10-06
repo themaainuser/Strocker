@@ -34,7 +34,7 @@ options, wind, start point, and every brush call with its exact width, direction
 transparency and time. Undo, Clear, Clear mask and Generate keep the recording in step
 with what's on the canvas. In the console, `SUMI.app.strokes()` returns the records.
 
-Use it in another canvas app with just `js/rng.js` + `js/brushes.js` + `js/recorder.js`:
+Use it in another canvas app with just `js/rng.js` + `js/brushes.js` + `js/recorder.js` + `js/playback.js`:
 
 ```js
 const ctx = canvas.getContext('2d', { willReadFrequently: true }); // CPU raster: see below
@@ -44,7 +44,22 @@ pen.segment(a, b, width, direction, { speed, alpha });      // per move (speed, 
 const stroke = pen.end();                                   // on pointerup → JSON-safe record
 
 SUMI.replayStroke(otherCtx, JSON.parse(JSON.stringify(stroke))); // same pixels
+
+// animated: several strokes, in recorded order, at any speed (ends with the same pixels)
+const run = SUMI.replay(ctx, strokes, { speed: 2 });        // or a function stroke => ctx
+await run.done;                                             // run.cancel() stops, run.finish() jumps to the end
 ```
+
+**▶ Replay** in the panel repaints your recorded strokes on a clean sheet, animated. Pick a
+speed (0.5×–8×) and a timing:
+- **as drawn**: keeps your pauses.
+- **back to back**: drops the pauses between strokes.
+- **all at once**: strokes start together. Where strokes cross, the final pixels can differ,
+  because their calls interleave.
+
+**Stop** jumps to the end, so the canvas always matches the recording. Replay is undoable.
+
+Animation frames pause in background tabs, so a replay in a hidden tab waits.
 
 A replay is byte-identical to the original only on the same browser engine and the same
 kind of canvas. Create canvases with `{ willReadFrequently: true }`: CPU and GPU canvases
@@ -74,7 +89,8 @@ app.js            UI, pointer input, undo, render loop (SUMI.app)
 js/rng.js         seeded RNG + value noise — every random draw goes through here
 js/layers.js      offscreen layers (wash, scene, ink, fx, mask), compositing, export
 js/brushes.js     the seven brushes + ink helpers (spray, wash, shard, speed line)
-js/recorder.js    stroke recorder (pen) + pixel-identical replay
+js/recorder.js    stroke recorder (pen)
+js/playback.js    timeline + animated replay of recorded strokes
 js/contour.js     mask → marching-squares outline → inked edge and folds
 js/scene.js       bridge / pylon geometry, scene painting, mask clip
 js/generator.js   the poster recipe, auto-mask, fill mask

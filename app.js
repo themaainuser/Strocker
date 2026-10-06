@@ -115,7 +115,7 @@ function undo() {
   cancelRun();
   layers.restore(entry.snap);
   strokes = entry.strokes;
-  refreshMaskButtons();
+  refreshButtons();
   toastMsg('undo');
 }
 
@@ -190,7 +190,7 @@ addEventListener('pointerup', () => {
   pen = null;
   preview = null;
   layers.markDirty();
-  if (S.tool === 'mask') refreshMaskButtons();
+  refreshButtons(); // replay button follows the recording; fill-mask follows the mask
   log(S.tool, `${S.size}px · ${S.color}`);
 });
 
@@ -199,13 +199,13 @@ function setBusy(b) {
   busy = b;
   $('btnGenerate').textContent = b ? '■ Cancel' : '✦ Generate';
   $('btnReroll').disabled = b;
-  refreshMaskButtons();
+  refreshButtons();
 }
 function cancelRun() {
   if (!run) return;
   const r = run;
   run = null;
-  r.cancel();
+  if (r.finish) r.finish(); else r.cancel(); // an interrupted replay completes, so the canvas matches the recording
   setBusy(false);
 }
 function generate({ animate = true } = {}) {
@@ -230,6 +230,28 @@ function generate({ animate = true } = {}) {
   });
   return r;
 }
+// repaint the recorded strokes on a clean sheet, animated (js/playback.js); undoable
+function replay({ speed = +$('replaySpeed').value, timing = $('replayTiming').value } = {}) {
+  if (!strokes.length) { toastMsg('nothing recorded yet'); return null; }
+  cancelRun();
+  pushUndo(ALL_LAYERS);
+  layers.clear(ALL_LAYERS);
+  const recs = strokes.slice();
+  const shape = timing === 'sequence' ? { timing, gap: 150 } : timing === 'overlap' ? { timing, stagger: 0 } : { timing };
+  log('replay', `${recs.length} strokes · ${speed}× · ${timing}`);
+  const r = SUMI.replay(s => layers.get(SUMI.brushes[s.tool].layer).ctx, recs,
+    { ...shape, speed, onFrame: () => layers.markDirty() });
+  run = r;
+  setBusy(true);
+  r.done.then(completed => {
+    if (run !== r) return;
+    run = null;
+    setBusy(false);
+    layers.markDirty();
+    if (completed) toastMsg('replay done');
+  });
+  return r;
+}
 function fillMask() {
   if (busy) return;
   if (layers.isMaskEmpty()) return toastMsg('paint a mask first (key 7)');
@@ -241,11 +263,14 @@ function clearMask() {
   pushUndo(['mask']);
   layers.clear(['mask']);
   strokes = strokes.filter(s => SUMI.brushes[s.tool].layer !== 'mask');
-  refreshMaskButtons();
+  refreshButtons();
 }
-function refreshMaskButtons() {
+function refreshButtons() {
   if (!layers) return;
   $('btnFillMask').disabled = busy || layers.isMaskEmpty();
+  // while busy the replay button is the Stop button, so it stays enabled
+  $('btnReplay').textContent = busy && run && run.finish ? '■ Stop' : '▶ Replay';
+  $('btnReplay').disabled = busy ? !(run && run.finish) : !strokes.length;
 }
 
 // ---------- UI ----------
@@ -293,6 +318,7 @@ $('btnGenerate').onclick = () => {
 $('btnReroll').onclick = () => { $('seedInput').value = newSeed(); generate(); };
 $('seedInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !busy) generate(); });
 $('btnFillMask').onclick = fillMask;
+$('btnReplay').onclick = () => { if (busy) cancelRun(); else replay(); };
 $('btnClearMask').onclick = clearMask;
 $('btnPaper').onclick = e => {
   S.paper = !S.paper;
@@ -306,7 +332,7 @@ $('btnClear').onclick = () => {
   pushUndo(ALL_LAYERS);
   layers.clear(ALL_LAYERS);
   strokes = [];
-  refreshMaskButtons();
+  refreshButtons();
   toastMsg('cleared');
 };
 $('btnSave').onclick = () => {
@@ -319,7 +345,7 @@ $('btnSave').onclick = () => {
 
 addEventListener('keydown', e => {
   const t = e.target;
-  const typing = t && (t.isContentEditable || t.tagName === 'TEXTAREA' ||
+  const typing = t && (t.isContentEditable || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' ||
     (t.tagName === 'INPUT' && !['range', 'checkbox', 'color', 'button'].includes(t.type)));
   if (typing) return;
   const n = Number(e.key);
@@ -340,13 +366,13 @@ let frames = 0, lastF = performance.now();
 
 addEventListener('resize', resize);
 $('seedInput').value = S.seed;
-updateLabels(); refreshCode(); resize(); refreshMaskButtons();
+updateLabels(); refreshCode(); resize(); refreshButtons();
 
 SUMI.app = {
   S,
   get layers() { return layers; },
   get busy() { return busy; },
-  setTool, generate, cancel: cancelRun, undo, fillMask, clearMask, renderNow,
+  setTool, generate, replay, cancel: cancelRun, undo, fillMask, clearMask, renderNow,
   undoDepth: () => undoStack.length,
   strokes: () => strokes.slice(),
 };
