@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SUMI — Ink Strokes Console</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <div class="brand">
+      <div class="brand-mark">墨</div>
+      <div>
+        <h1>SUMI CONSOLE</h1>
+        <p>js-only ink strokes · eclipse edition</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <label class="section-title">Brush — press 1-5</label>
+      <div class="brush-grid" id="brushGrid">
+        <button data-brush="sumi" class="active"><span>🖌</span>Dry Brush</button>
+        <button data-brush="splatter"><span>✸</span>Splatter</button>
+        <button data-brush="scratch"><span>╱</span>Scratch</button>
+        <button data-brush="wash"><span>◍</span>Wash</button>
+        <button data-brush="shard"><span>◇</span>Shard</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <label class="section-title">Ink</label>
+      <div class="swatches" id="swatches">
+        <button data-color="#111318" class="active" style="--c:#111318" title="sumi black"></button>
+        <button data-color="#2b3a4a" style="--c:#2b3a4a" title="bridge indigo"></button>
+        <button data-color="#5a6d7e" style="--c:#5a6d7e" title="wash grey-blue"></button>
+        <button data-color="#7a1f1f" style="--c:#7a1f1f" title="hanko red"></button>
+      </div>
+      <div class="row">
+        <input type="color" id="inkColor" value="#111318" />
+        <span id="inkHex">#111318</span>
+      </div>
+    </div>
+
+    <div class="section sliders">
+      <div class="ctl"><div class="ctl-head"><label>Size</label><b id="v-size">34</b></div><input type="range" id="s-size" min="2" max="140" value="34" /></div>
+      <div class="ctl"><div class="ctl-head"><label>Opacity</label><b id="v-opacity">0.85</b></div><input type="range" id="s-opacity" min="5" max="100" value="85" /></div>
+      <div class="ctl"><div class="ctl-head"><label>Dryness <i>gap in bristles</i></label><b id="v-dry">0.55</b></div><input type="range" id="s-dry" min="0" max="100" value="55" /></div>
+      <div class="ctl"><div class="ctl-head"><label>Splatter <i>all brushes</i></label><b id="v-splat">40</b></div><input type="range" id="s-splat" min="0" max="100" value="40" /></div>
+      <div class="ctl"><div class="ctl-head"><label>Bleed <i>all brushes</i></label><b id="v-bleed">35</b></div><input type="range" id="s-bleed" min="0" max="100" value="35" /></div>
+      <div class="ctl"><div class="ctl-head"><label>Taper <i>speed → thin + light</i></label><b id="v-taper">0.65</b></div><input type="range" id="s-taper" min="0" max="100" value="65" /></div>
+      <div class="ctl"><div class="ctl-head"><label>Grain <i>paper texture</i></label><b id="v-grain">60</b></div><input type="range" id="s-grain" min="0" max="100" value="60" /></div>
+    </div>
+
+    <div class="section">
+      <label class="section-title">Paper & canvas</label>
+      <div class="row btn-row">
+        <button id="btnPaper" class="ghost on">Paper grain: on</button>
+        <button id="btnUndo" class="ghost">↩ Undo</button>
+      </div>
+      <div class="row btn-row">
+        <button id="btnClear" class="ghost danger">Clear</button>
+        <button id="btnSave" class="ghost">↓ PNG</button>
+        <button id="btnDemo" class="solid">✦ Demo</button>
+      </div>
+    </div>
+
+    <div class="section console">
+      <label class="section-title">live console <span id="fps">60 fps</span></label>
+      <pre id="codeOut"></pre>
+      <div id="log"></div>
+    </div>
+
+    <p class="hint">drag to paint · <kbd>1–5</kbd> brush · <kbd>[</kbd><kbd>]</kbd> size · <kbd>ctrl+z</kbd> undo<br/>no libraries — canvas2d only</p>
+  </aside>
+
+  <main id="stage">
+    <canvas id="board"></canvas>
+    <canvas id="grain"></canvas>
+    <div id="cursor"></div>
+    <div id="toast"></div>
+    <div class="stamp">ECLIPSE</div>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0e0e10; --panel:#141416; --line:#242428;
+  --txt:#ece9e2; --dim:#8b8b90; --accent:#e8e2d5;
+  --paper:#f4f1ea;
+}
+html,body{height:100%;background:var(--bg);color:var(--txt);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+#app{display:flex;height:100vh;overflow:hidden}
+#panel{width:320px;min-width:320px;background:var(--panel);border-right:1px solid var(--line);padding:18px 16px;overflow-y:auto;display:flex;flex-direction:column;gap:16px}
+.brand{display:flex;gap:12px;align-items:center}
+.brand-mark{width:44px;height:44px;background:var(--accent);color:#111;display:grid;place-items:center;font-size:26px;border-radius:6px}
+.brand h1{font-size:14px;letter-spacing:.18em}
+.brand p{font-size:11px;color:var(--dim)}
+.section{display:flex;flex-direction:column;gap:10px}
+.section-title{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.section-title span{float:right;color:#6f6}
+.brush-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.brush-grid button:last-child{grid-column:span 2}
+.brush-grid button{background:#1c1c1f;border:1px solid var(--line);color:var(--txt);padding:10px;border-radius:8px;cursor:pointer;font:inherit;font-size:12px;display:flex;gap:8px;align-items:center}
+.brush-grid button.active{border-color:var(--accent);background:#232327}
+.brush-grid button:hover{border-color:#555}
+.swatches{display:flex;gap:10px}
+.swatches button{width:30px;height:30px;border-radius:50%;background:var(--c);border:2px solid transparent;cursor:pointer}
+.swatches button.active{border-color:#fff}
+.row{display:flex;align-items:center;gap:10px}
+input[type=color]{width:40px;height:28px;border:none;background:none;cursor:pointer}
+#inkHex{font-size:12px;color:var(--dim)}
+.sliders{gap:12px}
+.ctl-head{display:flex;justify-content:space-between;font-size:12px}
+.ctl-head i{color:var(--dim);font-style:normal;opacity:.7}
+.ctl-head b{color:var(--accent)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.btn-row{display:flex;gap:8px}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--txt);padding:8px 10px;border-radius:8px;cursor:pointer;font:inherit;font-size:12px;flex:1}
+button.ghost.on{border-color:#6f6}
+button.ghost.danger{color:#ff9a9a}
+button.solid{background:var(--accent);border:none;color:#111;padding:8px 12px;border-radius:8px;cursor:pointer;font:inherit;font-weight:700;flex:1}
+.console pre{background:#0a0a0c;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;line-height:1.5;color:#b8f0b8;white-space:pre-wrap;min-height:86px}
+#log{font-size:11px;color:var(--dim);max-height:110px;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
+#log div b{color:var(--txt)}
+.hint{font-size:11px;color:var(--dim);line-height:1.7}
+kbd{background:#222;border:1px solid #333;border-radius:4px;padding:0 5px;font-size:10px}
+#stage{position:relative;flex:1;background:#000}
+#board{position:absolute;inset:0;width:100%;height:100%;cursor:none;touch-action:none;background:var(--paper);z-index:1}
+#grain{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2;opacity:1}
+#cursor{position:absolute;width:34px;height:34px;border:1.5px solid #111;border-radius:50%;pointer-events:none;transform:translate(-50%,-50%);mix-blend-mode:multiply;opacity:.7;z-index:3}
+#cursor::after{content:'';position:absolute;left:50%;top:50%;width:3px;height:3px;background:#111;border-radius:50%;transform:translate(-50%,-50%)}
+.stamp{position:absolute;top:22px;left:26px;font-size:12px;letter-spacing:.35em;color:#111;opacity:.55;pointer-events:none;z-index:2}
+.stamp::before{content:'◯ ';letter-spacing:0}
+#toast{position:absolute;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:#111;color:#fff;padding:8px 16px;border-radius:20px;font-size:12px;opacity:0;transition:.3s;pointer-events:none;z-index:4}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:860px){#app{flex-direction:column}#panel{width:100%;min-width:0;max-height:46vh}#stage{flex:1}}
