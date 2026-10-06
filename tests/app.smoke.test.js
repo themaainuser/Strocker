@@ -37,3 +37,27 @@ T.test('app: undo history capped at 15', async () => {
   const a = await app(); a.app.setTool('fine'); for (let i = 0; i < 20; i++) drag(a, line(50, 50 + i * 10, 300, 50 + i * 10, 4));
   T.eq(a.app.undoDepth(), 15);
 });
+T.test('app: a painted stroke replays pixel-identically from its recording', async () => {
+  const a = await app(); a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
+  const recs = a.app.strokes(); T.eq(recs.length, 1, 'strokes recorded');
+  const src = a.app.layers.get('ink').canvas, d = a.app.layers.dpr;
+  const c = document.createElement('canvas'); c.width = src.width; c.height = src.height;
+  const ctx = c.getContext('2d'); ctx.setTransform(d, 0, 0, d, 0, 0);
+  SUMI.replayStroke(ctx, JSON.parse(JSON.stringify(recs[0])));
+  T.eq(T.hash(c), T.hash(src));
+});
+T.test('app: recording follows undo, clear, clear mask and generate', async () => {
+  const a = await app(), tools = () => a.app.strokes().map(s => s.tool).join();
+  a.app.setTool('dry'); drag(a, line(100, 400, 300, 300)); drag(a, line(100, 300, 300, 200));
+  a.app.setTool('mask'); drag(a, line(500, 100, 520, 300, 6));
+  T.eq(tools(), 'dry,dry,mask');
+  T.assert(a.app.strokes()[1].t0 >= a.app.strokes()[0].t0, 'session clock moves forward');
+  a.app.undo(); T.eq(tools(), 'dry,dry', 'undo drops the last stroke');
+  a.app.setTool('mask'); drag(a, line(500, 100, 520, 300, 6));
+  await a.app.generate({ animate: false }).done;
+  T.eq(tools(), 'mask', 'generate wipes the painted layers but keeps the mask');
+  a.app.clearMask(); T.eq(tools(), '', 'clear mask drops mask strokes');
+  a.app.undo(); T.eq(tools(), 'mask');
+  a.w.document.getElementById('btnClear').click(); T.eq(tools(), '', 'clear empties the recording');
+  a.app.undo(); T.eq(tools(), 'mask', 'undo brings it back');
+});

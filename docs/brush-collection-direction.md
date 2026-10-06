@@ -44,6 +44,11 @@ What a host app or a recorder can rely on:
 
 ## To build next
 
+Status: **1** and **4** are built on branch `feat/stroke-recorder`: `js/recorder.js` with
+`SUMI.recordStroke` (a pen: `dab` / `segment` / `end`) and `SUMI.replayStroke`. The app
+records every hand stroke, and the recording follows Undo, Clear, Clear mask and Generate.
+**2** and **3** are next.
+
 1. **Stroke recorder.**
    - **Per stroke:** `v` (format version), `tool`, the raw seed exactly as passed (number or
      string), `opts` after `normalizeOpts`, `wind`, `erase`, the start point `p0`, whether
@@ -77,6 +82,15 @@ What a host app or a recorder can rely on:
    - **Scope of "pixel-identical":** the same browser engine and canvas setup. JS maths
      functions and GPU vs software rasterisers differ across browsers. The exported HTML
      will look the same elsewhere, but won't match byte for byte.
+   - **Same rasteriser, verified in the live app.** Within one browser, a GPU-drawn stroke
+     and its CPU-drawn replay differ. Chrome moved a GPU layer to the CPU after a pixel
+     readback, so the live stroke and its replay no longer matched. The app's paint layers
+     are therefore CPU canvases (`willReadFrequently: true`), and the export's playback
+     canvas must be one too. With that, 9 overlapping strokes across all 4 layers replayed
+     byte-identically after JSON.
+   - **Size:** about 140 bytes per segment row (full-precision numbers, one row per 2.5 px
+     sub-step). A 190-segment stroke is about 26 KB, and the 9-stroke test above was 137 KB. Fine for JSON. If exports get large, delta-encode the rows instead of
+     rounding them.
 
 ## Note
 

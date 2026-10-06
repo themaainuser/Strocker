@@ -6,6 +6,10 @@ window.SUMI = window.SUMI || {};
   S.LAYER_NAMES = ['wash', 'scene', 'ink', 'fx'];
   const ALL = [...S.LAYER_NAMES, 'mask'];
   const MASK_TINT = 'rgba(220,40,40,0.35)';
+  // paint layers rasterise on the CPU: GPU and CPU canvases antialias differently, and the
+  // browser may move a GPU canvas to the CPU after readbacks, which would make a replayed
+  // stroke differ from the live one. CPU raster is also what the mask/contour readbacks want.
+  const CPU = { willReadFrequently: true };
   const GRANULATION = 0.22; // how much pigment the granulation tile lifts out of washes
 
   function makeCanvas(w, h) {
@@ -42,14 +46,14 @@ window.SUMI = window.SUMI || {};
 
     function setup(name, old) {
       const canvas = makeCanvas(L.w * L.dpr, L.h * L.dpr);
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', CPU);
       if (old) ctx.drawImage(old, 0, 0, canvas.width, canvas.height);
       ctx.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
       layers[name] = { canvas, ctx };
     }
     function setupScratch() {
       scratch = makeCanvas(L.w * L.dpr, L.h * L.dpr);
-      pattern = scratch.getContext('2d').createPattern(granulationTile(), 'repeat');
+      pattern = scratch.getContext('2d', CPU).createPattern(granulationTile(), 'repeat');
       if (pattern.setTransform) pattern.setTransform(new DOMMatrix().scale(L.dpr));
     }
     for (const n of ALL) setup(n, null);

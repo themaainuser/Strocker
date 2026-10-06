@@ -9,6 +9,10 @@
 //     end: {alpha, t} | null }
 // t0 is ms since the caller's `origin`; every other t is ms since the stroke started.
 // Numbers are stored unrounded: rounding changes the pixels.
+//
+// Byte-identical replay also needs the same rasteriser for recording and replay: create
+// both canvases with getContext('2d', { willReadFrequently: true }) (CPU). GPU canvases
+// antialias differently, and the browser may move a GPU canvas to the CPU after readbacks.
 window.SUMI = window.SUMI || {};
 (function (S) {
   S.STROKE_FORMAT = 1;

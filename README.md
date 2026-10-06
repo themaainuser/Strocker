@@ -27,6 +27,30 @@ tool is active, and it is never exported. Hold `Alt` to erase. Then **Generate**
 **Fill mask** and paint the rest yourself. With no mask painted, Generate makes a
 temporary drape-shaped one from the seed.
 
+## Recording and replay
+
+Every hand stroke is recorded as plain JSON (`js/recorder.js`, format v1): tool, seed,
+options, wind, start point, and every brush call with its exact width, direction, speed,
+transparency and time. Undo, Clear, Clear mask and Generate keep the recording in step
+with what's on the canvas. In the console, `SUMI.app.strokes()` returns the records.
+
+Use it in another canvas app with just `js/rng.js` + `js/brushes.js` + `js/recorder.js`:
+
+```js
+const ctx = canvas.getContext('2d', { willReadFrequently: true }); // CPU raster: see below
+const pen = SUMI.recordStroke(ctx, { tool: 'dry', seed: Math.random(), opts: { size: 40 }, p0: { x, y } });
+pen.dab();                                                  // on pointerdown
+pen.segment(a, b, width, direction, { speed, alpha });      // per move (speed, alpha in 0..1)
+const stroke = pen.end();                                   // on pointerup → JSON-safe record
+
+SUMI.replayStroke(otherCtx, JSON.parse(JSON.stringify(stroke))); // same pixels
+```
+
+A replay is byte-identical to the original only on the same browser engine and the same
+kind of canvas. Create canvases with `{ willReadFrequently: true }`: CPU and GPU canvases
+antialias differently, and the browser may move a GPU canvas to the CPU after a pixel
+readback. The app's paint layers are CPU canvases for this reason.
+
 ## Brushes
 
 | Key | Brush | How it works |
@@ -50,6 +74,7 @@ app.js            UI, pointer input, undo, render loop (SUMI.app)
 js/rng.js         seeded RNG + value noise — every random draw goes through here
 js/layers.js      offscreen layers (wash, scene, ink, fx, mask), compositing, export
 js/brushes.js     the seven brushes + ink helpers (spray, wash, shard, speed line)
+js/recorder.js    stroke recorder (pen) + pixel-identical replay
 js/contour.js     mask → marching-squares outline → inked edge and folds
 js/scene.js       bridge / pylon geometry, scene painting, mask clip
 js/generator.js   the poster recipe, auto-mask, fill mask

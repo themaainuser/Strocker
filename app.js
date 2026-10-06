@@ -17,9 +17,11 @@ const newSeed = () => Math.random().toString(36).slice(2, 8);
 const S = { ...SUMI.defaultOpts(), tool: 'dry', wind: -35, seed: newSeed(), grain: 60, paper: true };
 
 let layers = null;
-let drawing = false, brush = null, st = null, last = null, lastW = 0, lastT = 0, smoothV = 0;
+let drawing = false, pen = null, last = null, lastW = 0, lastT = 0, smoothV = 0;
 let preview = null; // speed-line rubber band
 let undoStack = [];
+let strokes = []; // every hand stroke still on the canvas, as replayable records (js/recorder.js)
+const sessionStart = performance.now();
 let run = null, busy = false;
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -104,14 +106,15 @@ function renderNow() {
 
 // ---------- undo ----------
 function pushUndo(names) {
-  undoStack.push(layers.snapshot(names));
+  undoStack.push({ snap: layers.snapshot(names), strokes: strokes.slice() });
   if (undoStack.length > UNDO_LIMIT) undoStack.shift();
 }
 function undo() {
-  const snap = undoStack.pop();
-  if (!snap) return toastMsg('nothing to undo');
+  const entry = undoStack.pop();
+  if (!entry) return toastMsg('nothing to undo');
   cancelRun();
-  layers.restore(snap);
+  layers.restore(entry.snap);
+  strokes = entry.strokes;
   refreshMaskButtons();
   toastMsg('undo');
 }
@@ -137,17 +140,15 @@ function strokeTo(p) {
   const w = lastW + (target - lastW) * 0.4;
   const steps = Math.max(1, Math.floor(dist / 2.5));
   const dir = Math.atan2(p.y - last.y, p.x - last.x);
-  st.speed = sn;
-  st.alpha = S.tool === 'mask' ? 1 : 1 - react * 0.45 * sn; // fast = lighter ink
+  const alpha = S.tool === 'mask' ? 1 : 1 - react * 0.45 * sn; // fast = lighter ink
   for (let i = 1; i <= steps; i++) {
     const t0 = (i - 1) / steps, t1 = i / steps;
     const a = { x: last.x + (p.x - last.x) * t0, y: last.y + (p.y - last.y) * t0 };
     const b = { x: last.x + (p.x - last.x) * t1, y: last.y + (p.y - last.y) * t1 };
-    brush.segment(st, a, b, lastW + (w - lastW) * t1, dir);
+    pen.segment(a, b, lastW + (w - lastW) * t1, dir, { speed: sn, alpha });
   }
-  st.alpha = 1; // dab and end draw at full strength
   if (S.tool === 'lines') {
-    const p0 = st.p0, e = SUMI.ink.snapEnd(p0, p, windRad());
+    const p0 = pen.stroke.p0, e = SUMI.ink.snapEnd(p0, p, windRad());
     preview = c => {
       c.strokeStyle = 'rgba(17,19,24,0.6)'; c.lineWidth = 1; c.setLineDash([6, 5]);
       c.beginPath(); c.moveTo(p0.x, p0.y); c.lineTo(e.x, e.y); c.stroke(); c.setLineDash([]);
@@ -162,15 +163,17 @@ function strokeTo(p) {
 canvas.addEventListener('pointerdown', e => {
   if (busy || !layers) return;
   try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointers can't be captured */ }
-  brush = SUMI.brushes[S.tool];
-  pushUndo([brush.layer]);
-  st = SUMI.makeStroke(layers.get(brush.layer).ctx, Math.random(), strokeOpts(), windRad());
-  st.erase = e.altKey;
-  drawing = true;
+  const layer = SUMI.brushes[S.tool].layer;
+  pushUndo([layer]);
   const p = pos(e);
   last = p; lastW = S.size; lastT = performance.now(); smoothV = 0;
-  brush.start(st, p);
-  brush.dab(st, p);
+  // the pen draws and records the exact calls, including the seed, so the stroke can be replayed
+  pen = SUMI.recordStroke(layers.get(layer).ctx, {
+    tool: S.tool, seed: Math.random(), opts: strokeOpts(), wind: windRad(), erase: e.altKey, p0: p,
+    origin: sessionStart, canvas: { w: layers.w, h: layers.h, dpr: layers.dpr },
+  });
+  drawing = true; // only once the pen exists, so a failed start can't break every later move
+  pen.dab({ alpha: 1 });
   layers.markDirty();
   refreshCode(p.x, p.y);
 });
@@ -183,7 +186,8 @@ canvas.addEventListener('pointermove', e => {
 addEventListener('pointerup', () => {
   if (!drawing) return;
   drawing = false;
-  brush.end(st);
+  strokes.push(pen.end({ alpha: 1 }));
+  pen = null;
   preview = null;
   layers.markDirty();
   if (S.tool === 'mask') refreshMaskButtons();
@@ -207,6 +211,7 @@ function cancelRun() {
 function generate({ animate = true } = {}) {
   cancelRun();
   pushUndo(SUMI.LAYER_NAMES);
+  strokes = strokes.filter(s => SUMI.brushes[s.tool].layer === 'mask'); // the poster replaces everything else
   S.seed = $('seedInput').value.trim() || newSeed();
   $('seedInput').value = S.seed;
   setBusy(true);
@@ -235,6 +240,7 @@ function fillMask() {
 function clearMask() {
   pushUndo(['mask']);
   layers.clear(['mask']);
+  strokes = strokes.filter(s => SUMI.brushes[s.tool].layer !== 'mask');
   refreshMaskButtons();
 }
 function refreshMaskButtons() {
@@ -299,6 +305,7 @@ $('btnClear').onclick = () => {
   cancelRun();
   pushUndo(ALL_LAYERS);
   layers.clear(ALL_LAYERS);
+  strokes = [];
   refreshMaskButtons();
   toastMsg('cleared');
 };
@@ -341,4 +348,5 @@ SUMI.app = {
   get busy() { return busy; },
   setTool, generate, cancel: cancelRun, undo, fillMask, clearMask, renderNow,
   undoDepth: () => undoStack.length,
+  strokes: () => strokes.slice(),
 };

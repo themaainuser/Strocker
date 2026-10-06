@@ -42,3 +42,11 @@ T.test('layers: resize keeps content; zero size ignored', () => {
   L.resize(200, 160, 1); T.eq(L.get('ink').canvas.width, 200);
   T.assert(T.alpha(T.pixels(L.get('ink').canvas), 40, 40) > 0, 'scaled content');
 });
+T.test('layers: paint layers use the CPU rasteriser so recorded strokes replay identically', () => {
+  // GPU and CPU canvases antialias differently, and Chrome can silently move a GPU canvas
+  // to the CPU after readbacks — so a live stroke and its replay must both start on the CPU
+  const L = SUMI.createLayers(50, 40, 1);
+  for (const n of [...SUMI.LAYER_NAMES, 'mask']) T.eq(L.get(n).ctx.getContextAttributes().willReadFrequently, true, n);
+  L.resize(60, 50, 1);
+  T.eq(L.get('ink').ctx.getContextAttributes().willReadFrequently, true, 'after resize');
+});
