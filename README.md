@@ -55,6 +55,8 @@ js/scene.js       bridge / pylon geometry, scene painting, mask clip
 js/generator.js   the poster recipe, auto-mask, fill mask
 tests.html        in-browser test page (open it directly to see results)
 tests/run.mjs     headless runner
+tests/standalone.html   brush library without the poster modules
+tests/stroke-fixtures.js   a stroke recorded as plain data + replay helper
 ```
 
 All files are classic scripts on a `window.SUMI` namespace (no ES modules), so the page
@@ -66,8 +68,10 @@ works from `file://`.
 node tests/run.mjs
 ```
 
-The runner opens `tests.html` in headless Edge or Chrome (set `SUMI_BROWSER` to pick
-another Chromium-based browser) and prints failures plus a summary. Exit code 1 means
-a failure. The tests cover the RNG and noise, layers, every brush, contour tracing,
+The runner opens `tests.html` and `tests/standalone.html` (the brush library loaded
+alone: `rng.js` + `brushes.js` only) in headless Edge or Chrome. If a browser returns
+nothing, for example Edge mid-update, it falls back to the next one. Set `SUMI_BROWSER`
+to choose a Chromium-based browser yourself. It prints failures plus a summary; exit code
+1 means a failure. The tests cover the RNG and noise, layers, every brush, contour tracing,
 scene geometry, generator determinism and cancel, and app smoke tests that drive
 `index.html` in an iframe.

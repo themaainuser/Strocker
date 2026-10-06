@@ -138,14 +138,14 @@ function strokeTo(p) {
   const steps = Math.max(1, Math.floor(dist / 2.5));
   const dir = Math.atan2(p.y - last.y, p.x - last.x);
   st.speed = sn;
-  st.ctx.globalAlpha = S.tool === 'mask' ? 1 : 1 - react * 0.45 * sn; // fast = lighter ink
+  st.alpha = S.tool === 'mask' ? 1 : 1 - react * 0.45 * sn; // fast = lighter ink
   for (let i = 1; i <= steps; i++) {
     const t0 = (i - 1) / steps, t1 = i / steps;
     const a = { x: last.x + (p.x - last.x) * t0, y: last.y + (p.y - last.y) * t0 };
     const b = { x: last.x + (p.x - last.x) * t1, y: last.y + (p.y - last.y) * t1 };
     brush.segment(st, a, b, lastW + (w - lastW) * t1, dir);
   }
-  st.ctx.globalAlpha = 1;
+  st.alpha = 1; // dab and end draw at full strength
   if (S.tool === 'lines') {
     const p0 = st.p0, e = SUMI.ink.snapEnd(p0, p, windRad());
     preview = c => {

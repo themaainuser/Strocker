@@ -1,0 +1,95 @@
+# Brush collection — direction
+
+Date: 2026-10-06 · Applies to all work after the `feat/ink-poster-generator` branch.
+Updated the same day after the review of `js/rng.js` + `js/brushes.js` and its fix pass.
+
+## The real goal
+
+A reusable collection of brushes and strokes for my other project, which uses plain canvas.
+I don't want to recreate the ECLIPSE poster scene. The poster was only a style reference
+for the strokes.
+
+## Core to keep
+
+`js/rng.js` + `js/brushes.js`: dry brush, spray, fine line, speed lines, wash, shard, mask.
+
+- `brushes.js` depends only on `rng.js`. `tests/standalone.html` checks this by loading
+  just those two files. One soft exception remains: `ink.shard` reads `SUMI.PAPER` for the
+  chip colour, with a hard-coded `#f4f1ea` fallback.
+- `scene.js`, `generator.js`, `contour.js` and `layers.js` are poster-specific and optional.
+
+## The brush contract (in place since the fix pass)
+
+What a host app or a recorder can rely on:
+
+- **Inputs.** Output depends only on:
+  - the seed, opts, wind and erase flag
+  - the exact `start` / `dab` / `segment` / `end` arguments
+  - `st.speed` and `st.alpha`, both 0..1, set by the caller before each call
+  - the ctx's transform and clip
+
+  Every other ctx property is reset on entry and restored on exit, so brushes neither
+  leak state to the host nor pick it up.
+- **Alpha.** Alpha is explicit: `st.alpha`, not `ctx.globalAlpha`. In the app, `strokeTo`
+  sets `st.speed` / `st.alpha` before each move's sub-steps and resets alpha to 1 for
+  `dab` and `end`.
+- **Options.** `SUMI.makeStroke` normalises opts through `SUMI.normalizeOpts`: it fills
+  defaults, clamps ranges and copies the object. Colours must be `#rgb(a)`,
+  `#rrggbb(aa)`, `rgb()/rgba()` or a CSS name; anything else throws `TypeError`.
+- **Dry-brush dab.** The dab is deferred: a click leaves the mark at `end`, and a drag
+  cancels it.
+- **Freeze tests.** `tests/brushes.contract.test.js` pins the RNG/noise golden values and
+  one golden pixel hash per tool. If those change, saved strokes replay differently, so
+  bump the stroke format version.
+
+## To build next
+
+1. **Stroke recorder.**
+   - **Per stroke:** `v` (format version), `tool`, the raw seed exactly as passed (number or
+     string), `opts` after `normalizeOpts`, `wind`, `erase`, the start point `p0`, whether
+     `dab` was called plus its alpha, `endAlpha`, and the canvas `{ w, h, dpr }`.
+   - **Per segment:** `[ax, ay, bx, by, w, dir, speed, alpha, t]`.
+   - **Keep the seed.** Today it is `Math.random()` in the pointerdown handler
+     (`app.js:167`) and is thrown away.
+   - **Record the calls exactly as passed to `brush.segment`.** These are the app's
+     interpolated sub-steps from `strokeTo` (`app.js:128`–`160`), not raw mouse positions.
+     Wrapping `SUMI.brushes[tool]` is safe: brushes no longer call their own public methods.
+   - **Full precision.** Store full-precision doubles; JSON round-trips them exactly.
+     Rounding to two decimals changed the output of every brush except speed lines.
+   - **Clicks.** A click with no drag has zero segments, so `p0` and the dab flag are what
+     make it replayable.
+2. **Animated playback.** `SUMI.replay(ctx, stroke, { speed })`:
+   - Order: `start(p0)`, then `dab` if one was recorded, then the recorded segments as-is,
+     then `end`.
+   - Never re-split or re-interpolate the path. Re-splitting changed dry, spray and fine
+     by thousands of pixels. Playback speed only changes when each recorded call happens.
+   - **Overlapping strokes** are fine visually. They are pixel-identical only when calls
+     are applied in the recorded global order (by `t`).
+3. **Export as code.**
+   - JSON stroke data.
+   - A standalone HTML file (`rng.js` + `brushes.js` + strokes + a playback loop) that
+     animates with no dependencies.
+   - Optional: a WebM video via `canvas.captureStream()` + `MediaRecorder`.
+4. **Test first.** A replayed stroke must come out pixel-identical to the original.
+   - Already true at brush level: `replay: recorded calls survive JSON and repaint
+     identically on a used canvas` in `tests/brushes.contract.test.js`.
+   - The recorder's own test should reuse `tests/stroke-fixtures.js`.
+   - **Scope of "pixel-identical":** the same browser engine and canvas setup. JS maths
+     functions and GPU vs software rasterisers differ across browsers. The exported HTML
+     will look the same elsewhere, but won't match byte for byte.
+
+## Note
+
+The "live console" (`refreshCode`, `app.js:44`) is only a display and can't reproduce a
+stroke. Replace it with the real export.
+
+## Deferred (minor review items, not yet done)
+
+- Use `globalThis` instead of `window`, for Workers / OffscreenCanvas.
+- Pass the paper colour as `opts.paper` instead of reading `SUMI.PAPER`.
+- `stamp()` can place a stamp behind the segment start when the spacing shrinks.
+- The shard's tint fill still runs under its drop shadow.
+- Calling `segment` before `start` throws for some brushes.
+- Document `layer` as a compositing hint.
+- Half of the noise permutation table is never used.
+- Object seeds all hash to `'[object Object]'`.

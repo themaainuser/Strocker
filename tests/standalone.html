@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SUMI — standalone brush tests</title>
+<style>
+  body{background:#0e0e10;color:#ece9e2;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:20px}
+  #summary{font-size:15px;margin:12px 0}
+  ul{list-style:none;padding:0}
+  .pass{color:#8be08b}.fail{color:#ff9a9a}.skip{color:#d8c77a}
+</style>
+</head>
+<body>
+<h1>SUMI standalone brushes (rng.js + brushes.js only)</h1>
+<div id="summary">running…</div>
+<ul id="results"></ul>
+<script src="harness.js"></script>
+<script src="../js/rng.js"></script>
+<script src="../js/brushes.js"></script>
+<script src="stroke-fixtures.js"></script>
+<script src="standalone.test.js"></script>
+</body>
+</html>
