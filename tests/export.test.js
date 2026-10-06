@@ -99,4 +99,27 @@
     T.assert(blob && /webm/.test(blob.type), 'type ' + (blob && blob.type));
     T.assert(blob.size > 0, 'size ' + blob.size);
   });
+  T.test('export: WebM playback runs on its own timer, not on screen refreshes', async () => {
+    if (typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream) T.skip('no MediaRecorder here');
+    const raf = window.requestAnimationFrame;
+    window.requestAnimationFrame = () => 0; // a page that isn't being drawn (hidden, minimised, throttled)
+    try {
+      const { strokes } = recording();
+      const run = SUMI.recordWebM(strokes.slice(0, 2), { canvas: CANVAS, hold: 50 });
+      const blob = await Promise.race([run.done, new Promise(r => setTimeout(() => r('timed out'), 3000))]);
+      T.assert(blob instanceof Blob && blob.size > 0, 'finished without animation frames: ' + blob);
+    } finally { window.requestAnimationFrame = raf; }
+  });
+  T.test('export: the video opens on paper, not on a black frame', async () => {
+    if (typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream) T.skip('no MediaRecorder here');
+    const { strokes } = recording();
+    const blob = await SUMI.recordWebM(strokes.slice(0, 2), { canvas: CANVAS, hold: 200 }).done;
+    const v = document.createElement('video'); v.muted = true; v.src = URL.createObjectURL(blob);
+    const loaded = await Promise.race([new Promise(r => { v.onloadeddata = () => r(true); v.onerror = () => r(false); }), new Promise(r => setTimeout(() => r(false), 4000))]);
+    if (!loaded) T.skip('this browser cannot decode its own WebM');
+    v.currentTime = 0; await new Promise(r => { v.onseeked = r; }); // drawing right at loadeddata can read black
+    const c = T.canvas(v.videoWidth, v.videoHeight); c.ctx.drawImage(v, 0, 0);
+    const [r, g, b] = T.rgb(T.pixels(c.canvas), 5, 5); // a corner no stroke touches
+    T.assert(r > 200 && g > 200 && b > 190, 'first frame corner is ' + [r, g, b]);
+  });
 })();

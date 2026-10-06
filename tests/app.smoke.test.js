@@ -86,3 +86,48 @@ T.test('app: replay needs a recording; its pickers do not steal hotkeys', async 
   const sel = a.w.document.getElementById('replaySpeed'); sel.focus();
   sel.dispatchEvent(new a.w.KeyboardEvent('keydown', { key: '3', bubbles: true })); T.eq(a.app.S.tool, 'dry');
 });
+T.test('app: export panel shows the real last stroke and follows the recording', async () => {
+  const a = await app(), d = a.w.document, ids = ['btnExportJSON', 'btnExportHTML'];
+  for (const id of ids) T.assert(d.getElementById(id).disabled, id + ' disabled with nothing recorded');
+  a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
+  for (const id of ids) T.assert(!d.getElementById(id).disabled, id + ' enabled');
+  const code = d.getElementById('codeOut').textContent;
+  T.assert(code.includes('"tool":"dry"') && code.includes('"v":1'), 'shows the recorded stroke: ' + code.slice(0, 80));
+  T.assert(d.getElementById('recCount').textContent.startsWith('1 stroke'), 'count: ' + d.getElementById('recCount').textContent);
+  a.app.undo(); T.assert(d.getElementById('btnExportJSON').disabled, 'disabled again after undo');
+});
+T.test('app: JSON and HTML buttons download the recording', async () => {
+  const a = await app(), d = a.w.document, got = [];
+  a.w.HTMLAnchorElement.prototype.click = function () { got.push(this.download); };
+  a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
+  d.getElementById('btnExportJSON').click(); d.getElementById('btnExportHTML').click();
+  T.eq(got.length, 2); T.assert(/\.json$/.test(got[0]) && /\.html$/.test(got[1]), got.join());
+  const doc = SUMI.parseRecording(a.app.exportJSON()), L = a.app.layers;
+  T.eq(doc.strokes.length, 1);
+  T.eq(JSON.stringify(doc.canvas), JSON.stringify({ w: L.w, h: L.h, dpr: L.dpr }));
+  T.assert(a.app.exportHTML().includes('SUMI_PLAYER'), 'html player');
+});
+T.test('app: WebM button records and downloads a video', async () => {
+  if (typeof MediaRecorder === 'undefined') T.skip('no MediaRecorder here');
+  const a = await app(), btn = a.w.document.getElementById('btnExportWebM'), got = [];
+  a.w.HTMLAnchorElement.prototype.click = function () { got.push(this.download); };
+  a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
+  const job = a.app.exportWebM({ speed: Infinity, hold: 50 });
+  T.assert(btn.disabled, 'busy while recording');
+  T.assert(await job.done, 'got a video');
+  await new Promise(r => setTimeout(r, 0));
+  T.assert(got.some(n => /\.webm$/.test(n)), 'downloaded: ' + got.join());
+  T.assert(!btn.disabled, 'ready again');
+});
+T.test('app: a browser that cannot encode WebM gets a message, not an error', async () => {
+  const a = await app();
+  a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
+  a.w.SUMI.recordWebM = () => { throw new Error('this browser cannot encode WebM'); };
+  const btn = a.w.document.getElementById('btnExportWebM');
+  if (btn.disabled) T.skip('video export unavailable in this browser');
+  btn.click();
+  await new Promise(r => setTimeout(r, 0));
+  T.eq(a.w.__errors.length, 0, a.w.__errors.join('; '));
+  T.assert(/cannot encode WebM/.test(a.w.document.getElementById('toast').textContent), 'toast explains');
+  T.assert(!btn.disabled && btn.textContent.includes('WebM'), 'button ready again');
+});

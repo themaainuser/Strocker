@@ -43,15 +43,21 @@ function log(head, rest = '') {
   logEl.prepend(d);
   while (logEl.children.length > 40) logEl.lastChild.remove();
 }
-function refreshCode(x = 0, y = 0) {
-  codeOut.textContent =
-`brush.${S.tool}({
-  x: ${Math.round(x)}, y: ${Math.round(y)}, v: ${smoothV.toFixed(2)}px/ms,
-  size: ${S.size}, opacity: ${S.opacity},
-  dryness: ${S.dryness}, splatter: ${S.splatter},
-  bleed: ${S.bleed}, taper: ${S.taper},
-  ink: '${S.color}', wind: ${S.wind}°
-});`;
+// the export panel shows the real recording: the last stroke exactly as stored
+function refreshExport() {
+  const n = strokes.length, last = strokes[n - 1];
+  const kb = n ? (JSON.stringify(strokes).length / 1024).toFixed(1) + ' KB' : '';
+  $('recCount').textContent = n === 1 ? '1 stroke · ' + kb : n + ' strokes' + (n ? ' · ' + kb : '');
+  $('btnExportJSON').disabled = $('btnExportHTML').disabled = !n;
+  $('btnExportWebM').disabled = !n || !!videoJob || !CAN_RECORD_VIDEO;
+  if (!n) {
+    codeOut.textContent = '// paint something: every stroke is recorded\n// export it as JSON, a standalone HTML file or WebM';
+    return;
+  }
+  const shown = { ...last, segs: `[${last.segs.length} × [ax, ay, bx, by, w, dir, speed, alpha, t]]` };
+  codeOut.textContent = '// last stroke, exactly as recorded (segments elided)\n' + JSON.stringify(shown) +
+    '\n\n// replay a recording anywhere (rng.js + brushes.js + recorder.js + playback.js):\n' +
+    'SUMI.replay(ctx, SUMI.parseRecording(json).strokes, { speed: 1 })';
 }
 
 // ---------- canvas setup ----------
@@ -157,7 +163,6 @@ function strokeTo(p) {
   cursorSize(w);
   last = p; lastW = w; lastT = now;
   layers.markDirty();
-  refreshCode(p.x, p.y);
 }
 
 canvas.addEventListener('pointerdown', e => {
@@ -175,12 +180,11 @@ canvas.addEventListener('pointerdown', e => {
   drawing = true; // only once the pen exists, so a failed start can't break every later move
   pen.dab({ alpha: 1 });
   layers.markDirty();
-  refreshCode(p.x, p.y);
 });
 canvas.addEventListener('pointermove', e => {
   const p = pos(e);
   cursor.style.left = p.x + 'px'; cursor.style.top = p.y + 'px';
-  if (!drawing) { cursorSize(S.size); refreshCode(p.x, p.y); return; }
+  if (!drawing) { cursorSize(S.size); return; }
   strokeTo(p);
 });
 addEventListener('pointerup', () => {
@@ -230,6 +234,8 @@ function generate({ animate = true } = {}) {
   });
   return r;
 }
+const playbackShape = timing => (timing === 'sequence' ? { timing, gap: 150 } : timing === 'overlap' ? { timing, stagger: 0 } : { timing });
+
 // repaint the recorded strokes on a clean sheet, animated (js/playback.js); undoable
 function replay({ speed = +$('replaySpeed').value, timing = $('replayTiming').value } = {}) {
   if (!strokes.length) { toastMsg('nothing recorded yet'); return null; }
@@ -237,7 +243,7 @@ function replay({ speed = +$('replaySpeed').value, timing = $('replayTiming').va
   pushUndo(ALL_LAYERS);
   layers.clear(ALL_LAYERS);
   const recs = strokes.slice();
-  const shape = timing === 'sequence' ? { timing, gap: 150 } : timing === 'overlap' ? { timing, stagger: 0 } : { timing };
+  const shape = playbackShape(timing);
   log('replay', `${recs.length} strokes · ${speed}× · ${timing}`);
   const r = SUMI.replay(s => layers.get(SUMI.brushes[s.tool].layer).ctx, recs,
     { ...shape, speed, onFrame: () => layers.markDirty() });
@@ -267,6 +273,7 @@ function clearMask() {
 }
 function refreshButtons() {
   if (!layers) return;
+  refreshExport();
   $('btnFillMask').disabled = busy || layers.isMaskEmpty();
   // while busy the replay button is the Stop button, so it stays enabled
   $('btnReplay').textContent = busy && run && run.finish ? '■ Stop' : '▶ Replay';
@@ -280,7 +287,6 @@ function setTool(name) {
   document.querySelectorAll('#brushGrid button').forEach(b => b.classList.toggle('active', b.dataset.brush === name));
   cursor.classList.toggle('mask', name === 'mask');
   if (layers) layers.markDirty(); // mask tint follows the tool
-  refreshCode();
 }
 document.querySelectorAll('#brushGrid button').forEach(b => b.onclick = () => {
   setTool(b.dataset.brush);
@@ -335,6 +341,64 @@ $('btnClear').onclick = () => {
   refreshButtons();
   toastMsg('cleared');
 };
+// ---------- export (js/export.js) ----------
+// WebM needs canvas capture + a WebM encoder (Safari records MP4 only, so it gets a disabled button)
+const CAN_RECORD_VIDEO = typeof MediaRecorder !== 'undefined' && !!HTMLCanvasElement.prototype.captureStream &&
+  ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].some(t => MediaRecorder.isTypeSupported(t));
+let videoJob = null;
+const fileName = ext => `sumi-${S.seed}-${Date.now()}.${ext}`;
+function download(blob, name) {
+  const url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+// one coordinate space for all strokes: big enough for every stroke's canvas, first stroke's dpr
+function exportCanvas() {
+  return {
+    w: Math.max(...strokes.map(s => s.canvas.w)), h: Math.max(...strokes.map(s => s.canvas.h)),
+    dpr: strokes[0].canvas.dpr,
+  };
+}
+const exportPlayback = () => ({ speed: +$('replaySpeed').value, ...playbackShape($('replayTiming').value) });
+function exportJSON() { return SUMI.recordingJSON(strokes, { canvas: exportCanvas() }); }
+function exportHTML() {
+  return SUMI.standaloneHTML(strokes, { canvas: exportCanvas(), title: 'SUMI strokes · ' + S.seed, ...exportPlayback() });
+}
+function exportWebM(extra = {}) {
+  if (!strokes.length || videoJob || !CAN_RECORD_VIDEO) return null;
+  let job;
+  try {
+    job = SUMI.recordWebM(strokes.slice(), { canvas: exportCanvas(), ...exportPlayback(), ...extra });
+  } catch (err) {
+    toastMsg('video export failed: ' + err.message);
+    return null;
+  }
+  videoJob = job;
+  $('btnExportWebM').textContent = '● recording…';
+  refreshExport();
+  toastMsg('recording video in real time…');
+  job.done
+    .then(blob => { if (blob) { download(blob, fileName('webm')); log('export', 'WebM · ' + (blob.size / 1024).toFixed(0) + ' KB'); } },
+      err => toastMsg('video failed: ' + err.message))
+    .finally(() => {
+      if (videoJob === job) videoJob = null;
+      $('btnExportWebM').textContent = '↓ WebM';
+      refreshExport();
+    });
+  return job;
+}
+$('btnExportJSON').onclick = () => {
+  const json = exportJSON();
+  download(new Blob([json], { type: 'application/json' }), fileName('json'));
+  log('export', 'JSON · ' + strokes.length + ' strokes');
+};
+$('btnExportHTML').onclick = () => {
+  download(new Blob([exportHTML()], { type: 'text/html' }), fileName('html'));
+  log('export', 'HTML player · ' + strokes.length + ' strokes');
+};
+$('btnExportWebM').onclick = () => exportWebM();
+if (!CAN_RECORD_VIDEO) $('btnExportWebM').title = 'this browser cannot record canvas video';
+
 $('btnSave').onclick = () => {
   const out = layers.exportCanvas(S.paper && S.grain > 0 ? grainCanvas : null, 'ECLIPSE');
   const a = document.createElement('a');
@@ -366,13 +430,14 @@ let frames = 0, lastF = performance.now();
 
 addEventListener('resize', resize);
 $('seedInput').value = S.seed;
-updateLabels(); refreshCode(); resize(); refreshButtons();
+updateLabels(); resize(); refreshButtons();
 
 SUMI.app = {
   S,
   get layers() { return layers; },
   get busy() { return busy; },
   setTool, generate, replay, cancel: cancelRun, undo, fillMask, clearMask, renderNow,
+  exportJSON, exportHTML, exportWebM,
   undoDepth: () => undoStack.length,
   strokes: () => strokes.slice(),
 };

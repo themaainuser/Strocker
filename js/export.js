@@ -164,7 +164,10 @@ if (PLAY.speed === null) PLAY.speed = Infinity;
     });
     stage.composite();
     rec.start(250);
-    const run = stage.play({ speed, timing, gap, stagger });
+    // frames come from a timer at the video's frame rate, not from screen refreshes, so the
+    // video gets every frame even when the page isn't being drawn (hidden pane, throttled tab)
+    const frame = cb => setTimeout(cb, 1000 / fps);
+    const run = stage.play({ speed, timing, gap, stagger, frame });
     const stop = () => { if (rec.state !== 'inactive') rec.stop(); };
     run.done.then(() => setTimeout(stop, hold)); // hold the finished picture for a moment
     return { done, run, cancel() { cancelled = true; run.cancel(); stop(); } };

@@ -51,7 +51,11 @@ Status on branch `feat/stroke-recorder`:
 - **2 is built.** `js/playback.js` has `SUMI.playback` (time-ordered timeline with
   forward-only `seek`), `SUMI.replay` (animated: speed, `cancel`, `finish`) and
   `SUMI.replayStroke`. The app has a Replay control with speed and timing pickers.
-- **3 (export) is next.**
+- **3 is built.** `js/export.js` has `SUMI.recordingJSON` / `SUMI.parseRecording`
+  (validated `sumi-strokes` v1 document), `SUMI.standaloneHTML` (one file: the four core
+  modules inlined from their own source via `SUMI.modules`, plus a small layered player)
+  and `SUMI.recordWebM` (`captureStream` + `MediaRecorder`). The app's live console is now
+  the recording & export panel.
 
 1. **Stroke recorder.**
    - **Per stroke:** `v` (format version), `tool`, the raw seed exactly as passed (number or
@@ -93,6 +97,16 @@ Status on branch `feat/stroke-recorder`:
    - A standalone HTML file (`rng.js` + `brushes.js` + strokes + a playback loop) that
      animates with no dependencies.
    - Optional: a WebM video via `canvas.captureStream()` + `MediaRecorder`.
+   - **As built:**
+     - **Getting the source.** The export never fetches files, so it works from
+       `file://`. Each core file registers its own module function, and the export
+       inlines `fn.toString()`, which is the exact source.
+     - **HTML.** The exported HTML's layer pixels match the live layers (tested).
+     - **Video timing.** The video advances on its own timer at its frame rate, not on
+       screen refreshes. Driven by animation frames, a video recorded while the page
+       wasn't being drawn had no middle frames.
+     - **Safari.** It records MP4 only, so the WebM button is disabled there and errors
+       become a message.
 4. **Test first.** A replayed stroke must come out pixel-identical to the original.
    - Already true at brush level: `replay: recorded calls survive JSON and repaint
      identically on a used canvas` in `tests/brushes.contract.test.js`.
@@ -112,8 +126,9 @@ Status on branch `feat/stroke-recorder`:
 
 ## Note
 
-The "live console" (`refreshCode`, `app.js:44`) is only a display and can't reproduce a
-stroke. Replace it with the real export.
+The "live console" (`refreshCode`) was only a display and couldn't reproduce a stroke.
+**Done:** it is replaced by the recording & export panel, which shows the last stroke as
+actually stored.
 
 ## Deferred (minor review items, not yet done)
 

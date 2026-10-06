@@ -99,8 +99,14 @@
     </div>
 
     <div class="section console">
-      <label class="section-title">live console <span id="fps">60 fps</span></label>
+      <label class="section-title">recording & export <span id="fps">60 fps</span></label>
+      <div class="rec-head"><b id="recCount">0 strokes</b><span>format v1</span></div>
       <pre id="codeOut"></pre>
+      <div class="row btn-row">
+        <button id="btnExportJSON" class="ghost" disabled title="The recording as JSON (format v1)">↓ JSON</button>
+        <button id="btnExportHTML" class="ghost" disabled title="One HTML file that replays the strokes, nothing else needed">↓ HTML</button>
+        <button id="btnExportWebM" class="ghost" disabled title="A video of the replay, recorded in real time at the replay speed">↓ WebM</button>
+      </div>
       <div id="log"></div>
     </div>
 
@@ -120,6 +126,7 @@
 <script src="js/brushes.js"></script>
 <script src="js/recorder.js"></script>
 <script src="js/playback.js"></script>
+<script src="js/export.js"></script>
 <script src="js/contour.js"></script>
 <script src="js/scene.js"></script>
 <script src="js/generator.js"></script>

@@ -61,6 +61,30 @@ speed (0.5×–8×) and a timing:
 
 Animation frames pause in background tabs, so a replay in a hidden tab waits.
 
+## Export
+
+The **recording & export** panel shows how many strokes are recorded and their size, plus
+the last stroke exactly as stored. Three downloads:
+
+| Button | What you get |
+|---|---|
+| **↓ JSON** | The recording as a `sumi-strokes` v1 document: `{ format, v, canvas, paper, strokes }`. Load it back with `SUMI.parseRecording(json)`, which validates the format, version, canvas, colours and every stroke. |
+| **↓ HTML** | One file with `rng.js`, `brushes.js`, `recorder.js` and `playback.js` inlined, plus a small player. It animates the strokes on open at the replay speed and timing picked in the panel; click the canvas to replay. No other files and no network. |
+| **↓ WebM** | A video of the replay, recorded in real time at the replay speed (8× makes a short clip). Needs a browser that records WebM: Chrome, Edge or Firefox. In Safari the button is disabled. |
+
+The HTML player draws the same layers as the app: wash multiplied onto the paper, then
+ink, then shards. Its layer pixels match the app's in the same browser. Mask strokes are
+left out, and the HTML has no paper grain or wash granulation, so it looks slightly flatter
+than the app.
+
+Exporting works from `file://` too: each core file registers its module function in
+`SUMI.modules`, and the export inlines that function's source text instead of fetching the
+files.
+
+From code: `SUMI.recordingJSON(strokes, { canvas })`, `SUMI.standaloneHTML(strokes, { canvas, speed, timing })`
+and `SUMI.recordWebM(strokes, { canvas, speed, fps })`, which returns `{ done, cancel }`
+where `done` resolves to a Blob.
+
 A replay is byte-identical to the original only on the same browser engine and the same
 kind of canvas. Create canvases with `{ willReadFrequently: true }`: CPU and GPU canvases
 antialias differently, and the browser may move a GPU canvas to the CPU after a pixel
@@ -91,6 +115,7 @@ js/layers.js      offscreen layers (wash, scene, ink, fx, mask), compositing, ex
 js/brushes.js     the seven brushes + ink helpers (spray, wash, shard, speed line)
 js/recorder.js    stroke recorder (pen)
 js/playback.js    timeline + animated replay of recorded strokes
+js/export.js      JSON, standalone HTML player, WebM
 js/contour.js     mask → marching-squares outline → inked edge and folds
 js/scene.js       bridge / pylon geometry, scene painting, mask clip
 js/generator.js   the poster recipe, auto-mask, fill mask
