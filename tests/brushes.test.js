@@ -56,3 +56,38 @@ T.test('ink brushes: click without drag is safe and paints', () => {
   const c = T.canvas(50, 50), st = SUMI.makeStroke(c.ctx, 'lc', black()), p = { x: 25, y: 25 };
   SUMI.brushes.lines.start(st, p); SUMI.brushes.lines.dab(st, p); SUMI.brushes.lines.end(st);
 });
+T.test('brushes: target layers', () => {
+  const want = { dry: 'ink', spray: 'ink', fine: 'ink', lines: 'ink', wash: 'wash', shard: 'fx', mask: 'mask' };
+  for (const k in want) T.eq(SUMI.brushes[k] && SUMI.brushes[k].layer, want[k], k);
+});
+T.test('deformPolygon: vertex count and bound', () => {
+  const pts = Array.from({ length: 10 }, (_, i) => ({ x: 50 * Math.cos(i / 10 * 2 * Math.PI), y: 50 * Math.sin(i / 10 * 2 * Math.PI) }));
+  const out = SUMI.ink.deformPolygon(pts, 3, 0.45, SUMI.makeRng(1));
+  T.eq(out.length, 80); for (const p of out) T.assert(Math.hypot(p.x, p.y) <= 90 + 1e-6, 'radius ' + Math.hypot(p.x, p.y));
+});
+T.test('wash: translucent, bounded, deterministic', () => {
+  const a = T.canvas(300, 300), b = T.canvas(300, 300), o = { ...SUMI.defaultOpts(), opacity: 1, color: '#000000' };
+  SUMI.ink.washBlob(a.ctx, SUMI.makeRng('w'), 150, 150, 60, 30, o); SUMI.ink.washBlob(b.ctx, SUMI.makeRng('w'), 150, 150, 60, 30, o);
+  T.eq(T.hash(a.canvas), T.hash(b.canvas));
+  const px = T.pixels(a.canvas), al = T.alpha(px, 150, 150); T.assert(al > 0 && al < 200, 'centre alpha ' + al);
+  T.eq(T.inkCount(px, 0, 0, 300, 40) + T.inkCount(px, 0, 261, 300, 300), 0, 'ink beyond 1.8r');
+});
+T.test('shard: opaque paper face, deterministic', () => {
+  const a = T.canvas(200, 200), b = T.canvas(200, 200), o = { ...SUMI.defaultOpts(), splatter: 0 };
+  SUMI.ink.shard(a.ctx, SUMI.makeRng('s'), 100, 100, 60, SUMI.DEFAULT_WIND, o);
+  SUMI.ink.shard(b.ctx, SUMI.makeRng('s'), 100, 100, 60, SUMI.DEFAULT_WIND, o);
+  T.eq(T.hash(a.canvas), T.hash(b.canvas));
+  const [r, , , al] = T.rgb(T.pixels(a.canvas), 100, 100); T.assert(al === 255 && r > 150, 'centre ' + r + ',' + al);
+});
+T.test('mask: dab paints, erase clears', () => {
+  const c = T.canvas(100, 100);
+  SUMI.ink.maskDab(c.ctx, 50, 50, 20, false); T.eq(T.alpha(T.pixels(c.canvas), 50, 50), 255);
+  SUMI.ink.maskDab(c.ctx, 50, 50, 20, true); T.eq(T.alpha(T.pixels(c.canvas), 50, 50), 0);
+});
+T.test('paint brushes: click without drag is safe and paints', () => {
+  for (const name of ['wash', 'shard', 'mask']) {
+    const c = T.canvas(200, 200), st = SUMI.makeStroke(c.ctx, 'click-' + name, { ...SUMI.defaultOpts(), opacity: 1 }), b = SUMI.brushes[name], p = { x: 100, y: 100 };
+    b.start(st, p); b.dab(st, p); b.segment(st, p, p, 34, 0); b.end(st);
+    T.assert(T.inkCount(T.pixels(c.canvas), 0, 0, 200, 200) > 0, name + ' painted nothing');
+  }
+});

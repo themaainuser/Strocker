@@ -112,8 +112,177 @@ window.SUMI = window.SUMI || {};
     if (rng.chance(0.3)) draw(rng.range(2, 5) * (rng.chance(0.5) ? 1 : -1), 0.5);
   };
 
+  // ---------- watercolor: layered, re-deformed polygons (darker where edges pile up) ----------
+  const centroid = pts => {
+    let x = 0, y = 0;
+    for (const p of pts) { x += p.x; y += p.y; }
+    return { x: x / pts.length, y: y / pts.length };
+  };
+  const clampPts = (pts, cx, cy, R) => {
+    for (const p of pts) {
+      const d = Math.hypot(p.x - cx, p.y - cy);
+      if (d > R) { p.x = cx + (p.x - cx) * R / d; p.y = cy + (p.y - cy) * R / d; }
+    }
+    return pts;
+  };
+  ink.deformPolygon = (pts, depth, spread, rng) => {
+    const c = centroid(pts);
+    let maxR = 0;
+    for (const p of pts) maxR = Math.max(maxR, Math.hypot(p.x - c.x, p.y - c.y));
+    let cur = pts.map(p => ({ x: p.x, y: p.y }));
+    for (let d = 0; d < depth; d++) {
+      const next = [];
+      for (let i = 0; i < cur.length; i++) {
+        const a = cur[i], b = cur[(i + 1) % cur.length];
+        const len = Math.hypot(b.x - a.x, b.y - a.y);
+        next.push(a, {
+          x: (a.x + b.x) / 2 + rng.gauss() * spread * len,
+          y: (a.y + b.y) / 2 + rng.gauss() * spread * len,
+        });
+      }
+      cur = clampPts(next, c.x, c.y, maxR * 1.8);
+    }
+    return cur;
+  };
+  const tracePoly = (ctx, pts) => {
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+  };
+  ink.washBlob = (ctx, rng, x, y, r, layers, opts) => {
+    const base = Array.from({ length: 10 }, (_, i) =>
+      ({ x: x + Math.cos(i / 10 * TAU) * r, y: y + Math.sin(i / 10 * TAU) * r }));
+    const shape = clampPts(ink.deformPolygon(base, 3, 0.45, rng), x, y, 1.8 * r);
+    ctx.lineWidth = 1.2;
+    ctx.lineJoin = 'round';
+    for (let k = 0; k < layers; k++) {
+      const p = clampPts(ink.deformPolygon(shape, 2, 0.3, rng), x, y, 1.8 * r);
+      tracePoly(ctx, p);
+      ctx.fillStyle = ink.rgba(opts.color, opts.opacity * rng.range(0.02, 0.05));
+      ctx.fill();
+      ctx.strokeStyle = ink.rgba(opts.color, opts.opacity * 0.04);
+      ctx.stroke();
+    }
+  };
+
+  // ---------- torn paper shard: jagged edge, folded face, partial ink outline ----------
+  ink.shard = (ctx, rng, x, y, size, wind, opts) => {
+    const n = rng.int(4, 7), rx = size * rng.range(0.25, 0.5), stretch = rng.range(1.5, 2.5);
+    const rot = wind + rng.range(-0.52, 0.52), cr = Math.cos(rot), sr = Math.sin(rot);
+    const corners = Array.from({ length: n }, (_, i) => {
+      const a = i / n * TAU + rng.range(-0.35, 0.35), rr = rng.range(0.6, 1.1);
+      const lx = Math.cos(a) * rx * rr * stretch, ly = Math.sin(a) * rx * rr;
+      return { x: x + lx * cr - ly * sr, y: y + lx * sr + ly * cr };
+    });
+    // tear every edge into small jagged steps
+    const edges = corners.map((a, i) => {
+      const b = corners[(i + 1) % n], len = Math.hypot(b.x - a.x, b.y - a.y);
+      const nx = -(b.y - a.y) / (len || 1), ny = (b.x - a.x) / (len || 1);
+      const k = Math.max(2, Math.floor(len / 4)), amp = Math.min(2.2, len * 0.06);
+      const pts = [a];
+      for (let j = 1; j < k; j++) {
+        const t = j / k, o = rng.range(-1, 1) * amp;
+        pts.push({ x: a.x + (b.x - a.x) * t + nx * o, y: a.y + (b.y - a.y) * t + ny * o });
+      }
+      return pts;
+    });
+    const path = new Path2D();
+    edges.flat().forEach((p, i) => (i ? path.lineTo(p.x, p.y) : path.moveTo(p.x, p.y)));
+    path.closePath();
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.12)'; ctx.shadowBlur = 3; ctx.shadowOffsetY = 1;
+    ctx.fillStyle = S.PAPER || '#f4f1ea';
+    ctx.fill(path);
+    ctx.shadowColor = 'transparent';
+    // fold: shade one side of a line through the shard
+    const fa = rot + rng.range(0.6, 2.5), fx = x + rng.range(-0.3, 0.3) * rx, fy = y + rng.range(-0.3, 0.3) * rx;
+    const L = size * 4, ux = Math.cos(fa), uy = Math.sin(fa);
+    ctx.save();
+    ctx.clip(path);
+    ctx.fillStyle = 'rgba(90,100,110,0.25)';
+    ctx.beginPath();
+    ctx.moveTo(fx - ux * L, fy - uy * L); ctx.lineTo(fx + ux * L, fy + uy * L);
+    ctx.lineTo(fx + ux * L - uy * L, fy + uy * L + ux * L); ctx.lineTo(fx - ux * L - uy * L, fy - uy * L + ux * L);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(90,100,110,0.35)'; ctx.lineWidth = 0.6;
+    ctx.beginPath(); ctx.moveTo(fx - ux * L, fy - uy * L); ctx.lineTo(fx + ux * L, fy + uy * L); ctx.stroke();
+    ctx.restore();
+    // partial ink outline
+    ctx.strokeStyle = ink.rgba(opts.color, opts.opacity * 0.8);
+    ctx.lineWidth = 0.8;
+    ctx.lineJoin = 'round';
+    edges.forEach((pts, i) => {
+      if (!rng.chance(0.6)) return;
+      const end = corners[(i + 1) % n];
+      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+      for (let j = 1; j < pts.length; j++) ctx.lineTo(pts[j].x, pts[j].y);
+      ctx.lineTo(end.x, end.y); ctx.stroke();
+    });
+    ctx.restore();
+    if (opts.splatter > 0 && rng.chance(0.3 + opts.splatter / 100 * 0.55)) {
+      ink.spray(ctx, rng, x, y, wind, size * 0.45, opts.splatter / 100 * 0.9, opts);
+    }
+  };
+
+  // ---------- mask: soft round dab, or erase ----------
+  ink.maskDab = (ctx, x, y, r, erase) => {
+    ctx.save();
+    ctx.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.7, 'rgba(255,255,255,1)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+    ctx.restore();
+  };
+
+  // place stamps every `spacing` px of travel, carrying the remainder across segments
+  function stamp(st, a, b, spacing, fn) {
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 0.01) return;
+    let d = spacing - (st.carry || 0);
+    while (d <= len) {
+      fn(a.x + (b.x - a.x) * d / len, a.y + (b.y - a.y) * d / len);
+      d += spacing;
+    }
+    st.carry = len - (d - spacing);
+  }
+
   // ---------- brushes ----------
   const brushes = S.brushes = {};
+
+  brushes.wash = {
+    layer: 'wash',
+    start(st) { st.carry = 0; },
+    segment(st, a, b, w) {
+      stamp(st, a, b, Math.max(2, 0.4 * w), (x, y) => ink.washBlob(st.ctx, st.rng, x, y, w * 0.55, 6, st.opts));
+    },
+    dab(st, p) { ink.washBlob(st.ctx, st.rng, p.x, p.y, st.opts.size * 0.55, 6, st.opts); },
+    end() {},
+  };
+
+  brushes.shard = {
+    layer: 'fx',
+    start(st) { st.carry = 0; },
+    segment(st, a, b, w) {
+      stamp(st, a, b, clamp(st.opts.size * 0.7, 18, 80), (x, y) => ink.shard(st.ctx, st.rng, x, y, w, st.wind, st.opts));
+    },
+    dab(st, p) { ink.shard(st.ctx, st.rng, p.x, p.y, st.opts.size, st.wind, st.opts); },
+    end() {},
+  };
+
+  brushes.mask = {
+    layer: 'mask',
+    start(st) { st.carry = 0; },
+    segment(st, a, b) {
+      const r = st.opts.size / 2;
+      stamp(st, a, b, Math.max(1, 0.25 * st.opts.size), (x, y) => ink.maskDab(st.ctx, x, y, r, st.erase));
+    },
+    dab(st, p) { ink.maskDab(st.ctx, p.x, p.y, st.opts.size / 2, st.erase); },
+    end() {},
+  };
 
   // persistent bristles: each keeps its own last point so streaks stay continuous,
   // and ink runs out along the stroke so the tail breaks into "flying white"
