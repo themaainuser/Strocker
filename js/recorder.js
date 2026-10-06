@@ -82,21 +82,5 @@ window.SUMI = window.SUMI || {};
       },
     };
   };
-
-  // repaint a recorded stroke by repeating its calls in order — never re-splitting the path
-  S.replayStroke = (ctx, stroke) => {
-    if (!stroke || stroke.v !== S.STROKE_FORMAT) {
-      throw new TypeError('unsupported stroke format: ' + JSON.stringify(stroke && stroke.v));
-    }
-    const brush = brushFor(stroke.tool);
-    const st = S.makeStroke(ctx, stroke.seed, stroke.opts, stroke.wind);
-    st.erase = !!stroke.erase;
-    brush.start(st, stroke.p0);
-    if (stroke.dab) { st.alpha = stroke.dab.alpha; brush.dab(st, stroke.p0); }
-    for (const [ax, ay, bx, by, w, dir, speed, alpha] of stroke.segs) {
-      st.speed = speed; st.alpha = alpha;
-      brush.segment(st, { x: ax, y: ay }, { x: bx, y: by }, w, dir);
-    }
-    if (stroke.end) { st.alpha = stroke.end.alpha; brush.end(st); }
-  };
+  // replaying lives in playback.js: SUMI.replayStroke / SUMI.playback / SUMI.replay
 })(window.SUMI);
