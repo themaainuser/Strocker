@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>SUMI — Ink Strokes Console</title>
+<script>window.__errors = []; addEventListener('error', e => __errors.push(e.message));</script>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -17,14 +18,31 @@
       </div>
     </div>
 
+    <div class="section gen">
+      <label class="section-title" for="seedInput">Generate — seeded poster</label>
+      <div class="row">
+        <input type="text" id="seedInput" spellcheck="false" autocomplete="off" aria-label="Seed" />
+        <button id="btnReroll" class="ghost fit" title="New seed, then generate">⟳ Reroll</button>
+      </div>
+      <button id="btnGenerate" class="solid wide">✦ Generate</button>
+      <div class="ctl"><div class="ctl-head"><label for="s-wind">Wind <i>slash angle</i></label><b id="v-wind">-35°</b></div><input type="range" id="s-wind" min="-80" max="80" value="-35" /></div>
+      <label class="check"><input type="checkbox" id="chkInkEdge" checked /> Ink mask edge</label>
+      <div class="row btn-row">
+        <button id="btnFillMask" class="ghost" disabled title="Fill the painted mask with the bridge/pylon scene">Fill mask</button>
+        <button id="btnClearMask" class="ghost">Clear mask</button>
+      </div>
+    </div>
+
     <div class="section">
-      <label class="section-title">Brush — press 1-5</label>
+      <label class="section-title">Brush — press 1-7</label>
       <div class="brush-grid" id="brushGrid">
-        <button data-brush="sumi" class="active"><span>🖌</span>Dry Brush</button>
-        <button data-brush="splatter"><span>✸</span>Splatter</button>
-        <button data-brush="scratch"><span>╱</span>Scratch</button>
+        <button data-brush="dry" class="active"><span>🖌</span>Dry brush</button>
+        <button data-brush="spray"><span>✸</span>Spray</button>
+        <button data-brush="fine"><span>✎</span>Fine line</button>
+        <button data-brush="lines"><span>╱</span>Speed lines</button>
         <button data-brush="wash"><span>◍</span>Wash</button>
         <button data-brush="shard"><span>◇</span>Shard</button>
+        <button data-brush="mask"><span>◐</span>Mask <i>alt = erase</i></button>
       </div>
     </div>
 
@@ -61,7 +79,6 @@
       <div class="row btn-row">
         <button id="btnClear" class="ghost danger">Clear</button>
         <button id="btnSave" class="ghost">↓ PNG</button>
-        <button id="btnDemo" class="solid">✦ Demo</button>
       </div>
     </div>
 
@@ -71,7 +88,7 @@
       <div id="log"></div>
     </div>
 
-    <p class="hint">drag to paint · <kbd>1–5</kbd> brush · <kbd>[</kbd><kbd>]</kbd> size · <kbd>ctrl+z</kbd> undo<br/>no libraries — canvas2d only</p>
+    <p class="hint">drag to paint · <kbd>1–7</kbd> brush · <kbd>[</kbd><kbd>]</kbd> size · <kbd>ctrl+z</kbd> undo · <kbd>alt</kbd> erase mask<br/>no libraries — canvas2d only</p>
   </aside>
 
   <main id="stage">
@@ -82,6 +99,12 @@
     <div class="stamp">ECLIPSE</div>
   </main>
 </div>
+<script src="js/rng.js"></script>
+<script src="js/layers.js"></script>
+<script src="js/brushes.js"></script>
+<script src="js/contour.js"></script>
+<script src="js/scene.js"></script>
+<script src="js/generator.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
