@@ -18,3 +18,14 @@ T.test('standalone: replay on a used canvas matches a fresh one', () => {
     T.eq(T.hash(b.canvas), T.hash(a.canvas), tool);
   }
 });
+T.test('standalone: a recorded stroke replays identically', () => {
+  for (const tool of FIX.TOOLS) {
+    const rec = FIX.makeCalls(tool), a = T.canvas(320, 220);
+    const pen = SUMI.recordStroke(a.ctx, { tool, seed: rec.seed, opts: rec.opts, wind: rec.wind, p0: rec.p0 });
+    pen.dab();
+    for (const [ax, ay, bx, by, w, dir, speed, alpha] of rec.segs) pen.segment({ x: ax, y: ay }, { x: bx, y: by }, w, dir, { speed, alpha });
+    const b = T.canvas(320, 220);
+    SUMI.replayStroke(b.ctx, JSON.parse(JSON.stringify(pen.end())));
+    T.eq(T.hash(b.canvas), T.hash(a.canvas), tool);
+  }
+});
