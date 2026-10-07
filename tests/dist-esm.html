@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SUMI — drop-in build (ES module)</title>
+<style>
+  body{background:#0e0e10;color:#ece9e2;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:20px}
+  #summary{font-size:15px;margin:12px 0}
+  ul{list-style:none;padding:0}
+  .pass{color:#8be08b}.fail{color:#ff9a9a}.skip{color:#d8c77a}
+</style>
+</head>
+<body>
+<h1>SUMI drop-in: dist/sumi-brushes.mjs only</h1>
+<div id="summary">running…</div>
+<ul id="results"></ul>
+<script src="harness.js"></script>
+<script type="module">
+  import SUMI, * as named from '../dist/sumi-brushes.mjs';
+  // the module must not create a global; record that before exposing it to the shared tests
+  window.DIST_ESM = { SUMI, named, leakedGlobal: 'SUMI' in window };
+  window.SUMI = SUMI;
+</script>
+<!-- module scripts run in order, before the harness starts on load -->
+<script type="module" src="stroke-fixtures.js"></script>
+<script type="module" src="rng.test.js"></script>
+<script type="module" src="brushes.test.js"></script>
+<script type="module" src="brushes.contract.test.js"></script>
+<script type="module" src="recorder.test.js"></script>
+<script type="module" src="playback.test.js"></script>
+<script type="module" src="standalone.test.js"></script>
+<script type="module" src="dist.test.js"></script>
+</body>
+</html>

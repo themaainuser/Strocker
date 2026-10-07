@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SUMI — drop-in build (classic script)</title>
+<style>
+  body{background:#0e0e10;color:#ece9e2;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:20px}
+  #summary{font-size:15px;margin:12px 0}
+  ul{list-style:none;padding:0}
+  .pass{color:#8be08b}.fail{color:#ff9a9a}.skip{color:#d8c77a}
+</style>
+</head>
+<body>
+<h1>SUMI drop-in: dist/sumi-brushes.js only</h1>
+<div id="summary">running…</div>
+<ul id="results"></ul>
+<script src="harness.js"></script>
+<script src="../dist/sumi-brushes.js"></script>
+<script src="stroke-fixtures.js"></script>
+<!-- the same library tests the separate source files pass -->
+<script src="rng.test.js"></script>
+<script src="brushes.test.js"></script>
+<script src="brushes.contract.test.js"></script>
+<script src="recorder.test.js"></script>
+<script src="playback.test.js"></script>
+<script src="standalone.test.js"></script>
+<script src="dist.test.js"></script>
+</body>
+</html>

@@ -27,6 +27,45 @@ tool is active, and it is never exported. Hold `Alt` to erase. Then **Generate**
 **Fill mask** and paint the rest yourself. With no mask painted, Generate makes a
 temporary drape-shaped one from the seed.
 
+## Drop-in file
+
+To use the brushes, the recorder and replay in another canvas project, copy **one** file
+from `dist/`:
+
+| File | Use it as | You get |
+|---|---|---|
+| `dist/sumi-brushes.js` | `<script src="sumi-brushes.js"></script>` | a global `SUMI` (also in workers, via `globalThis`) |
+| `dist/sumi-brushes.mjs` | `import SUMI, { recordStroke, replay } from './sumi-brushes.mjs'` | a module with no global |
+
+Both contain `js/rng.js`, `js/brushes.js`, `js/recorder.js` and `js/playback.js`
+unchanged, wrapped by a small build script. They paint exactly the same pixels as the
+separate files: the test runner runs the same library tests, pixel fingerprints included,
+on each build.
+
+```js
+const ctx = canvas.getContext('2d', { willReadFrequently: true }); // same canvas kind for record and replay
+const pen = SUMI.recordStroke(ctx, { tool: 'dry', seed: Math.random(), opts: { size: 40 }, p0: { x, y } });
+pen.dab();                                                    // pointerdown
+pen.segment(from, to, width, direction, { speed, alpha });    // each move
+const stroke = pen.end();                                     // pointerup → JSON-safe record
+SUMI.replay(otherCtx, [stroke], { speed: 2 });                // animated, same pixels at the end
+```
+
+Tools: `dry`, `spray`, `fine`, `lines`, `wash`, `shard`, `mask` (`SUMI.BRUSH_NAMES`). The
+banner at the top of each file states the brush-engine version, the stroke-format version
+and a hash of the sources it was built from.
+
+**Rebuilding.** Edit the files in `js/`, then run:
+
+```bash
+node tools/build-dist.mjs
+```
+
+The script has no dependencies. `node tests/run.mjs` fails if `dist/` is out of date.
+
+**Export.** JSON, standalone HTML and WebM export stays in `js/export.js`. Load it after
+`sumi-brushes.js` if you want it: it builds on the global `SUMI`.
+
 ## Recording and replay
 
 Every hand stroke is recorded as plain JSON (`js/recorder.js`, stroke format v2): tool,
@@ -135,6 +174,8 @@ js/brushes.js     the seven brushes + ink helpers (spray, wash, shard, speed lin
 js/recorder.js    stroke recorder (pen)
 js/playback.js    timeline + animated replay of recorded strokes
 js/export.js      JSON, standalone HTML player, WebM
+dist/             drop-in builds of rng + brushes + recorder + playback (generated)
+tools/build-dist.mjs   builds dist/ (node tools/build-dist.mjs, --check to verify)
 js/contour.js     mask → marching-squares outline → inked edge and folds
 js/scene.js       bridge / pylon geometry, scene painting, mask clip
 js/generator.js   the poster recipe, auto-mask, fill mask
@@ -142,6 +183,7 @@ tests.html        in-browser test page (open it directly to see results)
 tests/run.mjs     headless runner
 tests/standalone.html   brush library without the poster modules
 tests/stroke-fixtures.js   a stroke recorded as plain data + replay helper
+tests/dist*.html   the library tests again, against each drop-in build
 ```
 
 All files are classic scripts on a `window.SUMI` namespace (no ES modules), so the page
@@ -153,8 +195,14 @@ works from `file://`.
 node tests/run.mjs
 ```
 
-The runner opens `tests.html` and `tests/standalone.html` (the portable library loaded
-alone: `rng.js` + `brushes.js` + `recorder.js` + `playback.js`) in headless Edge or Chrome. If a browser returns
+The runner opens four pages in headless Edge or Chrome:
+- `tests.html`: everything.
+- `tests/standalone.html`: the portable library loaded alone (`rng.js` + `brushes.js` +
+  `recorder.js` + `playback.js`).
+- `tests/dist.html` and `tests/dist-esm.html`: the same library tests against each
+  drop-in build.
+
+It also checks that `dist/` matches the sources. If a browser returns
 nothing, for example Edge mid-update, it falls back to the next one. Set `SUMI_BROWSER`
 to choose a Chromium-based browser yourself. It prints failures plus a summary; exit code
 1 means a failure. The tests cover the RNG and noise, layers, every brush, contour tracing,

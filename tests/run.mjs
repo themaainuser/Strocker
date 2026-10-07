@@ -7,8 +7,9 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// the full suite, plus the portable library loaded on its own (rng, brushes, recorder, playback)
-const pages = ['tests.html', 'tests/standalone.html'];
+// the full suite; the portable library loaded on its own (rng, brushes, recorder, playback);
+// and the drop-in builds in dist/ (classic script and ES module) running the same library tests
+const pages = ['tests.html', 'tests/standalone.html', 'tests/dist.html', 'tests/dist-esm.html'];
 
 const candidates = [
   process.env.SUMI_BROWSER,
@@ -80,6 +81,14 @@ function runPage(rel) {
 
 const total = { passed: 0, failed: 0, skipped: 0 };
 let broken = false;
+
+// the drop-in files must be a fresh build of js/ — otherwise the dist pages test old code
+const { stale } = await import('../tools/build-dist.mjs');
+const outdated = stale();
+if (outdated.length) {
+  console.log(`FAIL [dist] out of date: ${outdated.join(', ')} — run node tools/build-dist.mjs`);
+  total.failed++;
+} else total.passed++;
 for (const rel of pages) {
   const r = runPage(rel);
   if (!r) { broken = true; continue; }

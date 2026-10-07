@@ -136,6 +136,14 @@ Status on branch `feat/stroke-recorder`:
      sub-step). A 190-segment stroke is about 26 KB, and the 9-stroke test above was 137 KB. Fine for JSON. If exports get large, delta-encode the rows instead of
      rounding them.
 
+## Drop-in packaging (done 2026-10-07)
+
+`dist/sumi-brushes.js` (classic script, global `SUMI`) and `dist/sumi-brushes.mjs` (ES
+module, no global) are built from the four core files by `tools/build-dist.mjs`, which has
+no dependencies. The build wraps the sources verbatim in one function that receives the
+namespace holder as `window`. Both builds pass the library tests, pixel fingerprints
+included, and `tests/run.mjs` fails when `dist/` is stale.
+
 ## Note
 
 The "live console" (`refreshCode`) was only a display and couldn't reproduce a stroke.
@@ -144,7 +152,8 @@ actually stored.
 
 ## Deferred (minor review items, not yet done)
 
-- Use `globalThis` instead of `window`, for Workers / OffscreenCanvas.
+- Use `globalThis` instead of `window`, for Workers / OffscreenCanvas. (Done for the drop-in
+  files: the build passes `globalThis` in as `window`. The separate `js/` files still use `window`.)
 - Pass the paper colour as `opts.paper` instead of reading `SUMI.PAPER`.
 - `stamp()` can place a stamp behind the segment start when the spacing shrinks.
 - The shard's tint fill still runs under its drop shadow.
