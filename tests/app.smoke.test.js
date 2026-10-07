@@ -120,7 +120,7 @@ T.test('app: export panel shows the real last stroke and follows the recording',
   a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
   for (const id of ids) T.assert(!d.getElementById(id).disabled, id + ' enabled');
   const code = d.getElementById('codeOut').textContent;
-  T.assert(code.includes('"tool":"dry"') && code.includes('"v":1'), 'shows the recorded stroke: ' + code.slice(0, 80));
+  T.assert(code.includes('"tool":"dry"') && code.includes('"v":' + SUMI.STROKE_FORMAT), 'shows the recorded stroke: ' + code.slice(0, 80));
   T.assert(d.getElementById('recCount').textContent.startsWith('1 stroke'), 'count: ' + d.getElementById('recCount').textContent);
   a.app.undo(); T.assert(d.getElementById('btnExportJSON').disabled, 'disabled again after undo');
 });
@@ -141,11 +141,23 @@ T.test('app: WebM button records and downloads a video', async () => {
   a.w.HTMLAnchorElement.prototype.click = function () { got.push(this.download); };
   a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
   const job = a.app.exportWebM({ speed: Infinity, hold: 50 });
-  T.assert(btn.disabled, 'busy while recording');
+  T.assert(!btn.disabled && /stop/i.test(btn.textContent), 'button becomes Stop while recording: ' + btn.textContent);
   T.assert(await job.done, 'got a video');
   await new Promise(r => setTimeout(r, 0));
   T.assert(got.some(n => /\.webm$/.test(n)), 'downloaded: ' + got.join());
-  T.assert(!btn.disabled, 'ready again');
+  T.assert(!btn.disabled && /WebM/.test(btn.textContent), 'ready again');
+});
+T.test('app: a running WebM export can be stopped from its button', async () => {
+  if (typeof MediaRecorder === 'undefined') T.skip('no MediaRecorder here');
+  const a = await app(), btn = a.w.document.getElementById('btnExportWebM'), got = [];
+  a.w.HTMLAnchorElement.prototype.click = function () { got.push(this.download); };
+  a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
+  const job = a.app.exportWebM({ speed: 0.25 });
+  btn.click();
+  T.eq(await job.done, null, 'cancelled video resolves null');
+  await new Promise(r => setTimeout(r, 0));
+  T.eq(got.length, 0, 'nothing downloaded');
+  T.assert(/WebM/.test(btn.textContent), 'button reset: ' + btn.textContent);
 });
 T.test('app: a browser that cannot encode WebM gets a message, not an error', async () => {
   const a = await app();

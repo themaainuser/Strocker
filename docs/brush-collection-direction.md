@@ -52,7 +52,7 @@ Status on branch `feat/stroke-recorder`:
   forward-only `seek`), `SUMI.replay` (animated: speed, `cancel`, `finish`) and
   `SUMI.replayStroke`. The app has a Replay control with speed and timing pickers.
 - **3 is built.** `js/export.js` has `SUMI.recordingJSON` / `SUMI.parseRecording`
-  (validated `sumi-strokes` v1 document), `SUMI.standaloneHTML` (one file: the four core
+  (validated `sumi-strokes` v1 document holding v2 strokes), `SUMI.standaloneHTML` (one file: the four core
   modules inlined from their own source via `SUMI.modules`, plus a small layered player)
   and `SUMI.recordWebM` (`captureStream` + `MediaRecorder`). The app's live console is now
   the recording & export panel.
@@ -61,7 +61,8 @@ Status on branch `feat/stroke-recorder`:
    - **Per stroke:** `v` (format version), `tool`, the raw seed exactly as passed (number or
      string), `opts` after `normalizeOpts`, `wind`, `erase`, the start point `p0`, whether
      `dab` was called plus its alpha, `endAlpha`, and the canvas `{ w, h, dpr }`.
-   - **Per segment:** `[ax, ay, bx, by, w, dir, speed, alpha, t]`.
+   - **Per segment:** `[ax, ay, bx, by, w, dir, speed, alpha, t]`. Format v2 adds a call
+     number `n` to every row (see below).
    - **Keep the seed.** Today it is `Math.random()` in the pointerdown handler
      (`app.js:167`) and is thrown away.
    - **Record the calls exactly as passed to `brush.segment`.** These are the app's
@@ -78,10 +79,21 @@ Status on branch `feat/stroke-recorder`:
      by thousands of pixels. Playback speed only changes when each recorded call happens.
    - **Overlapping strokes** are fine visually. They are pixel-identical only when calls
      are applied in the recorded global order (by `t`).
-   - **As built:** every call sits on one timeline sorted by `t0 + t`, with ties kept in
-     recorded order. Each animation frame only decides how far along that fixed order to
-     go. Verified in the live browser: a 7-stroke recording animated at 2× (1,265 calls)
-     ended byte-identical to the instant replay.
+   - **As built:** every call sits on one timeline. Each animation frame only decides how
+     far along that fixed order to go. Verified in the live browser: a 7-stroke recording
+     animated at 2× (1,265 calls) ended byte-identical to the instant replay.
+   - **Format v2 (after the branch review).** v1 sorted on `t0 + t`. That float sum could
+     put a stroke's start before the previous stroke's end when both happened at the same
+     clock reading (about 2% of exact ties). Two pens drawing at once fell back to array
+     order. v2 fixes both:
+     - every time is stored on the session clock;
+     - every call gets a page-wide number `n`;
+     - playback sorts on (time, `n`).
+
+     v1 strokes are converted on load. v2 also records `engine` (`SUMI.BRUSH_ENGINE`), and
+     the golden-hash tests are keyed by it.
+   - **`dab` comes first.** Calling `dab()` after the first `segment()` throws, because a
+     replay would put the dab first and paint differently.
    - **Timing modes:**
      - `recorded`: keeps the pauses.
      - `sequence`: back to back, plus a `gap`.

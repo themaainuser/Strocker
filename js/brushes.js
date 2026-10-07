@@ -9,6 +9,10 @@
 window.SUMI = window.SUMI || {};
 (function sumiBrushes(S) {
   S.DEFAULT_WIND = -35 * Math.PI / 180; // lower-left → upper-right, like the reference slashes
+  // Version of what these brushes paint. Recordings store it; bump it whenever a change alters
+  // the pixels of an existing stroke (the golden-hash tests are keyed by it).
+  S.BRUSH_ENGINE = 1;
+  const DAB_CANCEL_PX = 2; // dry brush: travel that turns a click into a drag
 
   S.defaultOpts = () => ({ size: 34, opacity: 0.85, dryness: 0.55, splatter: 40, bleed: 35, taper: 0.65, color: '#111318' });
 
@@ -42,7 +46,7 @@ window.SUMI = window.SUMI || {};
       return [(n >> 16) & 255, (n >> 8) & 255, n & 255, h.length === 8 ? parseInt(h.slice(6), 16) / 255 : 1];
     }
     m = FUNC.exec(s);
-    if (m) {
+    if (m && [m[1], m[2], m[3], m[4] === undefined ? '0' : m[4]].every(v => Number.isFinite(+v))) {
       const a = m[4] === undefined ? 1 : m[5] ? +m[4] / 100 : +m[4];
       return [clamp(Math.round(+m[1]), 0, 255), clamp(Math.round(+m[2]), 0, 255), clamp(Math.round(+m[3]), 0, 255), clamp(a, 0, 1)];
     }
@@ -241,10 +245,12 @@ window.SUMI = window.SUMI || {};
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.closePath();
   };
-  function washRaw(ctx, rng, x, y, r, layers, opts) {
+  // `detail` is the radius that picks the edge detail (default: r). The wash brush passes one
+  // value per stroke, so the outline doesn't jump as a speed-thinned stroke changes width.
+  function washRaw(ctx, rng, x, y, r, layers, opts, detail = r) {
     r = Math.max(0.5, r);
     // edge detail scales with size: small dabs don't need 320-vertex outlines
-    const baseDepth = r < 6 ? 1 : r < 24 ? 2 : 3, layerDepth = r < 24 ? 1 : 2;
+    const baseDepth = detail < 6 ? 1 : detail < 24 ? 2 : 3, layerDepth = detail < 24 ? 1 : 2;
     const base = Array.from({ length: 10 }, (_, i) =>
       ({ x: x + Math.cos(i / 10 * TAU) * r, y: y + Math.sin(i / 10 * TAU) * r }));
     const shape = clampPts(ink.deformPolygon(base, baseDepth, 0.45, rng), x, y, 1.8 * r);
@@ -407,19 +413,23 @@ window.SUMI = window.SUMI || {};
       st.arc = 0;
       st.budget = 900 * (1 - 0.6 * o.dryness);
       st.pendingDab = null;
+      st.dabTravel = 0;
     },
     segment(st, a, b, w, dir) {
-      if (Math.hypot(b.x - a.x, b.y - a.y) >= 0.01) st.pendingDab = null; // a drag: the stroke is the touch-down
+      // a real drag (2 px of travel) makes the stroke itself the touch-down; jitter doesn't
+      st.dabTravel += Math.hypot(b.x - a.x, b.y - a.y);
+      if (st.dabTravel >= DAB_CANCEL_PX) st.pendingDab = null;
       drySegment(st, a, b, w, dir);
     },
     // deferred: only a click (no real movement before end) leaves the dab mark,
     // so drags never get a sideways hook at their start
-    dab(st, p) { st.pendingDab = p; },
+    dab(st, p) { st.pendingDab = { p, alpha: alphaOf(st) }; },
     end(st) {
-      const p = st.pendingDab;
-      if (!p) return;
+      const pd = st.pendingDab;
+      if (!pd) return;
       st.pendingDab = null;
-      const w = st.opts.size * 0.6;
+      const { p } = pd, w = st.opts.size * 0.6;
+      st.ctx.globalAlpha = pd.alpha; // drawn now, at the strength it was pressed with
       drySegment(st, { x: p.x - 3, y: p.y }, { x: p.x + 3, y: p.y }, w, 0);
       if (st.opts.splatter > 0) sprayRaw(st.ctx, st.rng, p.x, p.y, st.wind, w * 0.5, st.opts.splatter / 100 * 0.8, st.opts);
     },
@@ -489,7 +499,7 @@ window.SUMI = window.SUMI || {};
     layer: 'wash',
     start(st) { st.carry = 0; },
     segment(st, a, b, w) {
-      stamp(st, a, b, Math.max(2, 0.4 * w), (x, y) => washRaw(st.ctx, st.rng, x, y, w * 0.55, 6, st.opts));
+      stamp(st, a, b, Math.max(2, 0.4 * w), (x, y) => washRaw(st.ctx, st.rng, x, y, w * 0.55, 6, st.opts, st.opts.size * 0.55));
     },
     dab(st, p) { washRaw(st.ctx, st.rng, p.x, p.y, st.opts.size * 0.55, 6, st.opts); },
     end() {},
@@ -541,6 +551,7 @@ window.SUMI = window.SUMI || {};
   }
   S.brushes = {};
   for (const name of Object.keys(raw)) S.brushes[name] = guard(raw[name]);
+  S.BRUSH_NAMES = Object.keys(raw); // the built-ins (a host may add its own brushes to S.brushes)
   // export.js inlines this function's own source into standalone HTML files
   (S.modules || (S.modules = {})).brushes = sumiBrushes;
 })(window.SUMI);

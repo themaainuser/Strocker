@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// the full suite, plus the brush library loaded on its own (rng.js + brushes.js only)
+// the full suite, plus the portable library loaded on its own (rng, brushes, recorder, playback)
 const pages = ['tests.html', 'tests/standalone.html'];
 
 const candidates = [

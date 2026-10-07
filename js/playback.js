@@ -1,44 +1,33 @@
-// Playback of recorded strokes (format v1, see recorder.js). Every recorded call goes on one
-// timeline sorted by time; seek(t) applies, in that fixed order, every call due by t. Frame
-// timing and speed only change *when* calls happen, never their order or arguments, so an
-// animated replay ends pixel-identical to the live drawing at any speed.
+// Playback of recorded strokes (format v2, v1 still accepted; see recorder.js). Every recorded
+// call goes on one timeline sorted by time, exact ties broken by the recorded call number;
+// seek(t) applies, in that fixed order, every call due by t. Frame timing and speed only change
+// *when* calls happen, never their order or arguments, so an animated replay ends
+// pixel-identical to the live drawing at any speed.
 // Depends on rng.js + brushes.js + recorder.js.
 window.SUMI = window.SUMI || {};
 (function sumiPlayback(S) {
   const finite = v => typeof v === 'number' && Number.isFinite(v);
+  const brushFor = tool => S.brushes[tool]; // validateStroke has checked it exists
 
-  function brushFor(tool) {
-    const brush = Object.prototype.hasOwnProperty.call(S.brushes, tool) ? S.brushes[tool] : null;
-    if (!brush) throw new TypeError('unknown tool: ' + JSON.stringify(tool));
-    return brush;
-  }
-  function check(stroke) {
-    if (!stroke || stroke.v !== S.STROKE_FORMAT) {
-      throw new TypeError('unsupported stroke format: ' + JSON.stringify(stroke && stroke.v));
-    }
-    brushFor(stroke.tool);
-  }
-
-  // a stroke's calls as [time since its start, kind, segment index]; times never run backwards
-  function localEvents(s) {
-    const out = [[0, 'start', -1]];
-    let prev = 0;
-    const at = t => (prev = finite(t) ? Math.max(prev, t) : prev);
-    if (s.dab) out.push([at(s.dab.t), 'dab', -1]);
-    s.segs.forEach((g, i) => out.push([at(g[8]), 'seg', i]));
-    if (s.end) out.push([at(s.end.t), 'end', -1]);
+  // a stroke's calls as { abs: time on the session clock, n: call number, kind, i };
+  // times never run backwards within a stroke. v1 times were relative to the stroke's start.
+  function strokeEvents(s) {
+    const v2 = s.v === 2, abs = t => (v2 ? t : s.t0 + t);
+    let prev = s.t0;
+    const at = t => (prev = Math.max(prev, t));
+    const out = [{ abs: s.t0, n: v2 ? s.n0 : NaN, kind: 'start', i: -1 }];
+    if (s.dab) out.push({ abs: at(abs(s.dab.t)), n: v2 ? s.dab.n : NaN, kind: 'dab', i: -1 });
+    s.segs.forEach((g, i) => out.push({ abs: at(abs(g[8])), n: v2 ? g[9] : NaN, kind: 'seg', i }));
+    if (s.end) out.push({ abs: at(abs(s.end.t)), n: v2 ? s.end.n : NaN, kind: 'end', i: -1 });
     return out;
   }
 
-  // when each stroke starts on the playback clock
-  function startTimes(strokes, locals, timing, gap, stagger) {
-    if (timing === 'recorded') {
-      const t0 = strokes.map(s => (finite(s.t0) ? s.t0 : 0)), base = Math.min(...t0);
-      return t0.map(t => t - base);
-    }
+  // when each stroke starts on the playback clock (null = keep recorded times)
+  function startTimes(strokes, evs, timing, gap, stagger) {
+    if (timing === 'recorded') return null;
     if (timing === 'sequence') {
       let at = 0;
-      return locals.map(ev => { const start = at; at += ev[ev.length - 1][0] + gap; return start; });
+      return evs.map((ev, s) => { const start = at; at += ev[ev.length - 1].abs - strokes[s].t0 + gap; return start; });
     }
     if (timing === 'overlap') return strokes.map((_, i) => i * stagger);
     throw new TypeError('timing must be "recorded", "sequence" or "overlap"');
@@ -47,15 +36,20 @@ window.SUMI = window.SUMI || {};
   // target: a ctx, or a function (stroke) => ctx to route strokes (e.g. to layers)
   S.playback = (target, strokes, { timing = 'recorded', gap = 0, stagger = 0 } = {}) => {
     strokes = Array.isArray(strokes) ? strokes : [strokes];
-    strokes.forEach(check);
+    strokes.forEach(S.validateStroke);
     const ctxFor = typeof target === 'function' ? target : () => target;
-    const locals = strokes.map(localEvents);
-    const starts = startTimes(strokes, locals, timing, finite(gap) ? Math.max(0, gap) : 0, finite(stagger) ? Math.max(0, stagger) : 0);
+    const evs = strokes.map(strokeEvents);
+    const custom = startTimes(strokes, evs, timing, finite(gap) ? Math.max(0, gap) : 0, finite(stagger) ? Math.max(0, stagger) : 0);
+    const base = strokes.length ? Math.min(...strokes.map(s => s.t0)) : 0;
+    const starts = custom || strokes.map(s => s.t0 - base);
 
-    // stroke-major order before a stable sort: equal times keep recorded order
+    // recorded timing subtracts one base from every session time, which keeps their order
+    // exact; ties go by call number, then stroke-major order (stable sort)
     const events = [];
-    locals.forEach((ev, s) => ev.forEach(([t, kind, i]) => events.push({ time: starts[s] + t, s, kind, i })));
-    events.sort((a, b) => a.time - b.time);
+    evs.forEach((ev, s) => ev.forEach(e => events.push({
+      time: custom ? custom[s] + (e.abs - strokes[s].t0) : e.abs - base, n: e.n, s, kind: e.kind, i: e.i,
+    })));
+    events.sort((a, b) => (a.time - b.time) || (finite(a.n) && finite(b.n) ? a.n - b.n : 0));
     const duration = events.length ? events[events.length - 1].time : 0;
 
     const live = new Array(strokes.length).fill(null);
@@ -103,26 +97,28 @@ window.SUMI = window.SUMI || {};
     if (typeof speed !== 'number' || !(speed > 0)) throw new TypeError('speed must be a number > 0');
     const tl = S.playback(target, strokes, timing);
     const schedule = frame || (cb => requestAnimationFrame(cb));
-    let state = 'running', resolve;
-    const done = new Promise(r => { resolve = r; });
+    let state = 'running', resolve, reject;
+    const done = new Promise((res, rej) => { resolve = res; reject = rej; });
     const settle = completed => { if (state !== 'running') return; state = completed ? 'done' : 'cancelled'; resolve(completed); };
+    const fail = err => { if (state !== 'running') return; state = 'failed'; reject(err); };
     const report = () => { if (onFrame) onFrame(tl); };
+    // a brush that throws mid-replay rejects `done` (and stops) instead of leaving it pending
+    const step = t => { try { const finished = tl.seek(t); report(); return finished; } catch (err) { fail(err); return null; } };
 
-    if (speed === Infinity) { tl.seek(Infinity); report(); settle(true); }
+    if (speed === Infinity) { if (step(Infinity)) settle(true); }
     else {
       const t0 = clock();
       const tick = () => {
         if (state !== 'running') return;
-        const finished = tl.seek((clock() - t0) * speed);
-        report();
-        if (finished) settle(true); else schedule(tick);
+        const finished = step((clock() - t0) * speed);
+        if (finished) settle(true); else if (finished === false) schedule(tick);
       };
       schedule(tick);
     }
     return {
       timeline: tl, done,
-      cancel() { settle(false); },                                         // stop where it is
-      finish() { if (state === 'running') { tl.seek(Infinity); report(); settle(true); } }, // jump to the end
+      cancel() { settle(false); },                                               // stop where it is
+      finish() { if (state === 'running' && step(Infinity)) settle(true); },    // jump to the end
     };
   };
   // export.js inlines this function's own source into standalone HTML files

@@ -29,17 +29,22 @@ temporary drape-shaped one from the seed.
 
 ## Recording and replay
 
-Every hand stroke is recorded as plain JSON (`js/recorder.js`, format v1): tool, seed,
-options, wind, start point, and every brush call with its exact width, direction, speed,
-transparency and time. Undo, Clear, Clear mask and Generate keep the recording in step
-with what's on the canvas. In the console, `SUMI.app.strokes()` returns the records.
+Every hand stroke is recorded as plain JSON (`js/recorder.js`, stroke format v2): tool,
+seed, options, wind, start point, the brush-engine version, and every brush call with its
+exact width, direction, speed, transparency, time and call number. Times are ms on one
+session clock, and call numbers break exact ties (e.g. two pens at once). v1 strokes still
+replay. Undo, Clear, Clear mask and Generate keep the recording in step with what's on the
+canvas. In the console, `SUMI.app.strokes()` returns the records.
+
+Replay paints the strokes on top of the last generated poster or filled mask. Those aren't
+recorded, so exports contain the strokes only; the panel says so when a poster is present.
 
 Use it in another canvas app with just `js/rng.js` + `js/brushes.js` + `js/recorder.js` + `js/playback.js`:
 
 ```js
 const ctx = canvas.getContext('2d', { willReadFrequently: true }); // CPU raster: see below
 const pen = SUMI.recordStroke(ctx, { tool: 'dry', seed: Math.random(), opts: { size: 40 }, p0: { x, y } });
-pen.dab();                                                  // on pointerdown
+pen.dab();                                                  // on pointerdown — only before the first segment
 pen.segment(a, b, width, direction, { speed, alpha });      // per move (speed, alpha in 0..1)
 const stroke = pen.end();                                   // on pointerup → JSON-safe record
 
@@ -48,7 +53,19 @@ SUMI.replayStroke(otherCtx, JSON.parse(JSON.stringify(stroke))); // same pixels
 // animated: several strokes, in recorded order, at any speed (ends with the same pixels)
 const run = SUMI.replay(ctx, strokes, { speed: 2 });        // or a function stroke => ctx
 await run.done;                                             // run.cancel() stops, run.finish() jumps to the end
+
+SUMI.validateStroke(stroke);                                // throws TypeError on anything malformed
 ```
+
+Notes for a host app:
+- **Errors.** `done` rejects if a brush throws during a replay, instead of staying pending.
+- **Brush engine version.** Each stroke records `SUMI.BRUSH_ENGINE`. If you change a
+  brush so that it paints differently, bump that number. Old recordings still replay, but
+  with the new pixels.
+- **Paths.** Brushes restore every ctx setting they touch, but they do call
+  `beginPath()`, so finish any path you're building before you draw a stroke.
+- **Don't transpile these files.** The HTML export inlines their exact source; Babel
+  helpers wouldn't come along.
 
 **▶ Replay** in the panel repaints your recorded strokes on a clean sheet, animated. Pick a
 speed (0.5×–8×) and a timing:
@@ -68,9 +85,9 @@ the last stroke exactly as stored. Three downloads:
 
 | Button | What you get |
 |---|---|
-| **↓ JSON** | The recording as a `sumi-strokes` v1 document: `{ format, v, canvas, paper, strokes }`. Load it back with `SUMI.parseRecording(json)`, which validates the format, version, canvas, colours and every stroke. |
+| **↓ JSON** | The recording as a `sumi-strokes` v1 document: `{ format, v, canvas, paper, strokes }` (each stroke in format v2). Load it back with `SUMI.parseRecording(json)`, which validates the document and every stroke in full via `SUMI.validateStroke`. |
 | **↓ HTML** | One file with `rng.js`, `brushes.js`, `recorder.js` and `playback.js` inlined, plus a small player. It animates the strokes on open at the replay speed and timing picked in the panel; click the canvas to replay. No other files and no network. |
-| **↓ WebM** | A video of the replay, recorded in real time at the replay speed (8× makes a short clip). Needs a browser that records WebM: Chrome, Edge or Firefox. In Safari the button is disabled. |
+| **↓ WebM** | A video of the replay, recorded in real time at the replay speed (8× makes a short clip). While it records, the button reads **■ stop video**. Needs a browser that records WebM: Chrome, Edge or Firefox. In Safari the button is disabled. |
 
 The HTML player draws the same layers as the app: wash multiplied onto the paper, then
 ink, then shards. Its layer pixels match the app's in the same browser. Mask strokes are
@@ -81,9 +98,11 @@ Exporting works from `file://` too: each core file registers its module function
 `SUMI.modules`, and the export inlines that function's source text instead of fetching the
 files.
 
-From code: `SUMI.recordingJSON(strokes, { canvas })`, `SUMI.standaloneHTML(strokes, { canvas, speed, timing })`
-and `SUMI.recordWebM(strokes, { canvas, speed, fps })`, which returns `{ done, cancel }`
-where `done` resolves to a Blob.
+From code: `SUMI.recordingJSON(strokes, { canvas })`, `SUMI.standaloneHTML(strokes, { canvas, speed, timing, gap, stagger })`
+and `SUMI.recordWebM(strokes, { canvas, speed, fps })`. `recordWebM` returns
+`{ done, cancel, stream }`, where `done` resolves to a Blob, or to `null` after `cancel()`.
+Standalone HTML can only hold the built-in brushes (`SUMI.BRUSH_NAMES`): a stroke from a
+brush you added yourself is rejected with a TypeError.
 
 A replay is byte-identical to the original only on the same browser engine and the same
 kind of canvas. Create canvases with `{ willReadFrequently: true }`: CPU and GPU canvases
@@ -134,8 +153,8 @@ works from `file://`.
 node tests/run.mjs
 ```
 
-The runner opens `tests.html` and `tests/standalone.html` (the brush library loaded
-alone: `rng.js` + `brushes.js` only) in headless Edge or Chrome. If a browser returns
+The runner opens `tests.html` and `tests/standalone.html` (the portable library loaded
+alone: `rng.js` + `brushes.js` + `recorder.js` + `playback.js`) in headless Edge or Chrome. If a browser returns
 nothing, for example Edge mid-update, it falls back to the next one. Set `SUMI_BROWSER`
 to choose a Chromium-based browser yourself. It prints failures plus a summary; exit code
 1 means a failure. The tests cover the RNG and noise, layers, every brush, contour tracing,

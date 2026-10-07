@@ -27,19 +27,68 @@
     }
   });
 
-  T.test('recorder: record follows the documented schema', () => {
+  T.test('recorder: record follows the documented schema (v2)', () => {
     const c = T.canvas(W, H), s = record(c.ctx, 'dry', { opts: { size: 30, color: ' #abc ' } });
-    T.eq(s.v, SUMI.STROKE_FORMAT); T.eq(SUMI.STROKE_FORMAT, 1);
+    T.eq(s.v, SUMI.STROKE_FORMAT); T.eq(SUMI.STROKE_FORMAT, 2);
+    T.eq(s.engine, SUMI.BRUSH_ENGINE); T.assert(Number.isInteger(SUMI.BRUSH_ENGINE) && SUMI.BRUSH_ENGINE >= 1, 'engine version');
     T.eq(s.tool, 'dry'); T.eq(s.seed, 0.7316247301); T.eq(s.wind, -0.61); T.eq(s.erase, false);
     T.eq(JSON.stringify(s.opts), JSON.stringify(SUMI.normalizeOpts({ size: 30, color: ' #abc ' })));
     T.eq(JSON.stringify(s.p0), JSON.stringify({ x: 40.123456789, y: 160.987654321 }));
     T.eq(JSON.stringify(s.canvas), JSON.stringify({ w: W, h: H, dpr: 1 }));
+    // every time is ms since the caller's origin (clock starts at 1000, origin 900, steps of 16)
     T.eq(s.t0, 100, 't0 = first clock reading − origin');
-    T.eq(JSON.stringify(s.dab), JSON.stringify({ alpha: 1, t: 16 }));
+    T.eq(s.dab.alpha, 1); T.eq(s.dab.t, 116);
     T.eq(s.segs.length, 60);
-    for (const seg of s.segs) T.assert(seg.length === 9 && seg.every(Number.isFinite), 'segment shape');
-    T.eq(s.segs[0][8], 32); T.eq(s.segs[59][8], 32 + 59 * 16, 'segment t from the clock');
-    T.eq(JSON.stringify(s.end), JSON.stringify({ alpha: 1, t: 16 * 62 }));
+    for (const seg of s.segs) T.assert(seg.length === 10 && seg.every(Number.isFinite), 'segment shape');
+    T.eq(s.segs[0][8], 132); T.eq(s.segs[59][8], 132 + 59 * 16, 'segment t from the clock');
+    T.eq(s.end.alpha, 1); T.eq(s.end.t, 1092);
+    // every call has a session-wide sequence number, in call order
+    const ns = [s.n0, s.dab.n, ...s.segs.map(g => g[9]), s.end.n];
+    for (let i = 1; i < ns.length; i++) T.eq(ns[i], ns[i - 1] + 1, 'call numbers consecutive at ' + i);
+  });
+
+  T.test('recorder: dab after a segment throws and changes nothing', () => {
+    const a = T.canvas(W, H), pen = SUMI.recordStroke(a.ctx, { tool: 'spray', seed: 7, opts: base(), p0: { x: 60, y: 100 } });
+    pen.segment({ x: 60, y: 100 }, { x: 64, y: 101 }, 30, 0.2);
+    const before = T.hash(a.canvas);
+    let err = null; try { pen.dab(); } catch (e) { err = e; }
+    T.assert(err instanceof Error && /before the first segment/.test(err.message), 'error: ' + (err && err.message));
+    T.eq(T.hash(a.canvas), before, 'nothing drawn'); T.eq(pen.stroke.dab, null);
+    const s = pen.end(), b = T.canvas(W, H);
+    SUMI.replayStroke(b.ctx, JSON.parse(JSON.stringify(s)));
+    T.eq(T.hash(b.canvas), T.hash(a.canvas));
+  });
+
+  T.test('recorder: canvas option is validated; odd transforms still give a usable size', () => {
+    const ctx = T.canvas(200, 100).ctx;
+    for (const canvas of [{ w: 10, h: 10 }, { w: -1, h: 10, dpr: 1 }, { w: 10, h: NaN, dpr: 1 }]) {
+      let err = null; try { SUMI.recordStroke(ctx, { tool: 'fine', seed: 1, p0: { x: 1, y: 1 }, canvas }); } catch (e) { err = e; }
+      T.assert(err instanceof TypeError, JSON.stringify(canvas));
+    }
+    ctx.setTransform(-1, 0, 0, -1, 200, 100); // flipped
+    const c = SUMI.recordStroke(ctx, { tool: 'fine', seed: 1, p0: { x: 1, y: 1 } }).end().canvas;
+    T.assert(c.w > 0 && c.h > 0 && c.dpr > 0, JSON.stringify(c));
+  });
+
+  T.test('recorder: validateStroke accepts v1 and v2, rejects malformed strokes', () => {
+    const good = record(T.canvas(W, H).ctx, 'dry'), copy = () => JSON.parse(JSON.stringify(good));
+    SUMI.validateStroke(copy());
+    const v1 = copy(); v1.v = 1; delete v1.engine; delete v1.n0;
+    v1.segs = v1.segs.map(g => { const r = g.slice(0, 9); r[8] -= v1.t0; return r; });
+    v1.dab = { alpha: 1, t: v1.dab.t - v1.t0 }; v1.end = { alpha: 1, t: v1.end.t - v1.t0 };
+    SUMI.validateStroke(v1);
+    const breakers = {
+      'no p0': s => { delete s.p0; }, 'bad colour': s => { s.opts.color = 'notacolour'; }, 'object seed': s => { s.seed = {}; },
+      'null opts': s => { s.opts = null; }, 'NaN wind': s => { s.wind = 'x'; }, 'null segment': s => { s.segs[3] = null; },
+      'short segment': s => { s.segs[3] = s.segs[3].slice(0, 8); }, 'string in segment': s => { s.segs[3][4] = '30'; },
+      'bad dab': s => { s.dab = { alpha: 'x', t: 1, n: 1 }; }, 'bad end': s => { s.end = { t: 1 }; }, 'bad canvas': s => { s.canvas = { w: 0, h: 1, dpr: 1 }; },
+      'unknown tool': s => { s.tool = 'nope'; }, 'version 3': s => { s.v = 3; },
+    };
+    for (const k in breakers) {
+      const s = copy(); breakers[k](s);
+      let err = null; try { SUMI.validateStroke(s); } catch (e) { err = e; }
+      T.assert(err instanceof TypeError, k);
+    }
   });
 
   T.test('recorder: keeps full precision', () => {

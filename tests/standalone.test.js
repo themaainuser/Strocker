@@ -1,4 +1,4 @@
-// Runs with ONLY js/rng.js + js/brushes.js loaded — the portable brush library.
+// Runs with ONLY js/rng.js + brushes.js + recorder.js + playback.js — the portable library.
 T.test('standalone: no poster modules present', () => {
   T.eq(typeof SUMI.createLayers, 'undefined'); T.eq(typeof SUMI.scene, 'undefined'); T.eq(typeof SUMI.PAPER, 'undefined');
 });

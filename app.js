@@ -53,12 +53,14 @@ function refreshExport() {
   $('recCount').textContent = (n === 1 ? '1 stroke · ' + kb : n + ' strokes' + (n ? ' · ' + kb : '')) +
     (base ? ' · poster not exported' : ''); // Replay keeps the poster; exports hold the strokes only
   $('btnExportJSON').disabled = $('btnExportHTML').disabled = !n;
-  $('btnExportWebM').disabled = !n || !!videoJob || !CAN_RECORD_VIDEO;
+  // while a video records, the button is its Stop button
+  $('btnExportWebM').disabled = videoJob ? false : !n || !CAN_RECORD_VIDEO;
+  $('btnExportWebM').textContent = videoJob ? '■ stop video' : '↓ WebM';
   if (!n) {
     codeOut.textContent = '// paint something: every stroke is recorded\n// export it as JSON, a standalone HTML file or WebM';
     return;
   }
-  const shown = { ...last, segs: `[${last.segs.length} × [ax, ay, bx, by, w, dir, speed, alpha, t]]` };
+  const shown = { ...last, segs: `[${last.segs.length} × [ax, ay, bx, by, w, dir, speed, alpha, t, n]]` };
   codeOut.textContent = '// last stroke, exactly as recorded (segments elided)\n' + JSON.stringify(shown) +
     '\n\n// replay a recording anywhere (rng.js + brushes.js + recorder.js + playback.js):\n' +
     'SUMI.replay(ctx, SUMI.parseRecording(json).strokes, { speed: 1 })';
@@ -429,7 +431,6 @@ function exportWebM(extra = {}) {
     return null;
   }
   videoJob = job;
-  $('btnExportWebM').textContent = '● recording…';
   refreshExport();
   toastMsg('recording video in real time…');
   job.done
@@ -437,7 +438,6 @@ function exportWebM(extra = {}) {
       err => toastMsg('video failed: ' + err.message))
     .finally(() => {
       if (videoJob === job) videoJob = null;
-      $('btnExportWebM').textContent = '↓ WebM';
       refreshExport();
     });
   return job;
@@ -451,7 +451,9 @@ $('btnExportHTML').onclick = () => {
   download(new Blob([exportHTML()], { type: 'text/html' }), fileName('html'));
   log('export', 'HTML player · ' + strokes.length + ' strokes');
 };
-$('btnExportWebM').onclick = () => exportWebM();
+$('btnExportWebM').onclick = () => {
+  if (videoJob) { videoJob.cancel(); toastMsg('video stopped'); } else exportWebM();
+};
 if (!CAN_RECORD_VIDEO) $('btnExportWebM').title = 'this browser cannot record canvas video';
 
 $('btnSave').onclick = () => {

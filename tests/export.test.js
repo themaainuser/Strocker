@@ -52,6 +52,58 @@
     let e = null; try { SUMI.parseRecording('{not json'); } catch (x) { e = x; } T.assert(e instanceof SyntaxError, 'bad JSON text');
   });
 
+  T.test('export: parseRecording checks every stroke in full', () => {
+    const { strokes } = recording(), ok = () => JSON.parse(SUMI.recordingJSON(strokes, { canvas: CANVAS }));
+    const breakers = [d => { delete d.strokes[1].p0; }, d => { d.strokes[1].opts.color = 'notacolour'; }, d => { d.strokes[1].segs[2] = null; }];
+    for (const br of breakers) {
+      const d = ok(); br(d);
+      let e = null; try { SUMI.parseRecording(d); } catch (x) { e = x; } T.assert(e instanceof TypeError, br.toString());
+    }
+  });
+
+  T.test('export: player options are validated and nothing can close the script early', () => {
+    const { strokes } = recording();
+    for (const opts of [{ timing: 'sequence', gap: '</script><script>alert(1)</script>' }, { gap: -1 }, { stagger: NaN }]) {
+      let e = null; try { SUMI.standaloneHTML(strokes, { canvas: CANVAS, ...opts }); } catch (x) { e = x; }
+      T.assert(e instanceof TypeError, JSON.stringify(opts));
+    }
+    const s = JSON.parse(JSON.stringify(strokes));
+    s[1].seed = '</script><script>alert(1)</script><!--';
+    const html = SUMI.standaloneHTML(s, { canvas: CANVAS });
+    const scripts = html.split(/<script>/i).length - 1, closes = html.split(/<\/script>/i).length - 1;
+    T.eq(scripts, 1, 'one script element'); T.eq(closes, 1, 'closed once');
+    T.assert(!html.includes('<!--'), 'no HTML comment opener in the page');
+  });
+
+  T.test('export: player counts the strokes it plays and uses the live shard chip colour', () => {
+    const { strokes } = recording(), html = SUMI.standaloneHTML(strokes, { canvas: CANVAS });
+    T.assert(html.includes('5 strokes'), 'mask stroke not counted');
+    T.assert(html.includes('SUMI.PAPER = ' + JSON.stringify(SUMI.PAPER || '#f4f1ea')), 'chip colour carried over');
+  });
+
+  T.test('export: strokes from custom brushes cannot go into a standalone HTML file', () => {
+    SUMI.brushes.custom = { ...SUMI.brushes.fine };
+    try {
+      const pen = SUMI.recordStroke(T.canvas(50, 50).ctx, { tool: 'custom', seed: 1, p0: { x: 1, y: 1 } });
+      pen.segment({ x: 1, y: 1 }, { x: 9, y: 9 }, 2, 0.7);
+      let e = null; try { SUMI.standaloneHTML([pen.end()], { canvas: CANVAS }); } catch (x) { e = x; }
+      T.assert(e instanceof TypeError && /custom/.test(e.message), 'error: ' + (e && e.message));
+    } finally { delete SUMI.brushes.custom; }
+  });
+
+  T.test('export: WebM options are validated; tracks stop when the video is done', async () => {
+    if (typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream) T.skip('no MediaRecorder here');
+    const { strokes } = recording();
+    for (const fps of [0, -5, NaN, 500]) {
+      let e = null; try { SUMI.recordWebM(strokes, { canvas: CANVAS, fps }); } catch (x) { e = x; }
+      T.assert(e instanceof TypeError, 'fps ' + fps);
+    }
+    const job = SUMI.recordWebM(strokes.slice(0, 1), { canvas: CANVAS, speed: 16, hold: 50 });
+    const blob = await Promise.race([job.done, new Promise(r => setTimeout(() => r('timeout'), 5000))]);
+    if (blob === 'timeout') T.skip('this browser could not finish recording here');
+    T.assert(job.stream.getTracks().every(t => t.readyState === 'ended'), 'tracks still live');
+  });
+
   T.test('export: standalone HTML is one self-contained file', () => {
     const { strokes } = recording(), html = SUMI.standaloneHTML(strokes, { canvas: CANVAS, title: '</title><script>alert(1)</script>' });
     T.assert(html.startsWith('<!DOCTYPE html>'), 'doctype');

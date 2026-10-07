@@ -46,9 +46,9 @@
     const { strokes } = recording(), tl = SUMI.playback(T.canvas(W, H).ctx, strokes);
     const base = Math.min(...strokes.map(s => s.t0)), t = tl.duration / 2;
     let due = 0;
-    for (const s of strokes) {
-      const at = s.t0 - base, times = [0, s.dab.t, ...s.segs.map(g => g[8]), s.end.t];
-      due += times.filter(x => at + x <= t).length;
+    for (const s of strokes) { // v2: every time is on the same session clock as t0
+      const times = [s.t0, s.dab.t, ...s.segs.map(g => g[8]), s.end.t];
+      due += times.filter(x => x - base <= t).length;
     }
     tl.seek(t);
     T.eq(tl.position, due);
@@ -56,7 +56,7 @@
   });
 
   T.test('playback: timing modes place the stroke starts', () => {
-    const { strokes } = recording(), ctx = T.canvas(W, H).ctx, d = strokes.map(s => s.end.t);
+    const { strokes } = recording(), ctx = T.canvas(W, H).ctx, d = strokes.map(s => s.end.t - s.t0);
     const rec = SUMI.playback(ctx, strokes);
     T.eq(JSON.stringify(rec.starts), JSON.stringify(strokes.map(s => s.t0 - strokes[0].t0)), 'as drawn');
     T.eq(rec.duration, rec.starts[2] + d[2]);
@@ -116,10 +116,73 @@
     T.eq(await r2.done, true, 'finish resolves true');
   });
 
-  T.test('playback: unfinished strokes and odd times are safe', () => {
+  T.test('playback: unfinished strokes and out-of-order times are safe; missing numbers are rejected', () => {
     const { strokes } = recording(), s = JSON.parse(JSON.stringify(strokes[1]));
-    s.end = null; s.segs[3][8] = -50; s.segs[4][8] = undefined; delete s.dab;
+    s.end = null; s.segs[3][8] = -50; s.dab = null;
     const tl = SUMI.playback(T.canvas(W, H).ctx, [s]);
     T.eq(tl.seek(Infinity), true); T.eq(tl.position, tl.total);
+    s.segs[4][8] = null; // what undefined becomes after JSON
+    let err = null; try { SUMI.playback(T.canvas(W, H).ctx, [s]); } catch (e) { err = e; }
+    T.assert(err instanceof TypeError, 'malformed segment accepted');
+  });
+
+  // record live with a scripted clock: [tool, colour, clock reading per call]
+  T.test('playback: exact ties between strokes keep the recorded call order', () => {
+    let now = 0; const clock = () => now, origin = 1207, live = T.canvas(W, H);
+    const opts = c => ({ ...FIX.base(), color: c, size: 40, splatter: 60 });
+    now = 20264.9;
+    const z = SUMI.recordStroke(live.ctx, { tool: 'fine', seed: 1, opts: opts('#000'), p0: { x: 20, y: 20 }, clock, origin });
+    z.segment({ x: 20, y: 20 }, { x: 60, y: 30 }, 2, 0.2); const sz = z.end();
+    now = 110485.9;
+    const a = SUMI.recordStroke(live.ctx, { tool: 'lines', seed: 2, opts: opts('#ff0000'), p0: { x: 40, y: 180 }, clock, origin });
+    a.segment({ x: 40, y: 180 }, { x: 280, y: 40 }, 30, -0.53);
+    now = 111747.3; const sa = a.end();
+    const b = SUMI.recordStroke(live.ctx, { tool: 'spray', seed: 3, opts: opts('#0000ff'), p0: { x: 160, y: 110 }, clock, origin });
+    b.dab(); const sb = b.end();
+    const c = T.canvas(W, H);
+    SUMI.playback(c.ctx, JSON.parse(JSON.stringify([sz, sa, sb]))).seek(Infinity);
+    T.eq(T.hash(c.canvas), T.hash(live.canvas));
+  });
+
+  T.test('playback: two pens recording at once replay in call order', () => {
+    const clock = () => 5000, live = T.canvas(W, H); // a coarse clock: every call ties
+    const pen = (seed, color, y) => SUMI.recordStroke(live.ctx, { tool: 'dry', seed, opts: { ...FIX.base(), color, size: 40 }, p0: { x: 20, y }, clock });
+    const red = pen(1, '#cc0000', 80), blue = pen(2, '#0000cc', 140);
+    for (let i = 0; i < 40; i++) {
+      const x = 20 + i * 7;
+      blue.segment({ x, y: 140 - i * 1.5 }, { x: x + 7, y: 140 - (i + 1) * 1.5 }, 40, -0.2);
+      red.segment({ x, y: 80 + i * 1.5 }, { x: x + 7, y: 80 + (i + 1) * 1.5 }, 40, 0.2);
+    }
+    const strokes = JSON.parse(JSON.stringify([red.end(), blue.end()]));
+    const c = T.canvas(W, H); SUMI.playback(c.ctx, strokes).seek(Infinity);
+    T.eq(T.hash(c.canvas), T.hash(live.canvas));
+  });
+
+  T.test('playback: v1 strokes (relative times) still replay', () => {
+    const live = T.canvas(W, H), rec = makeCalls('dry');
+    const pen = SUMI.recordStroke(live.ctx, { tool: 'dry', seed: rec.seed, opts: rec.opts, wind: rec.wind, p0: rec.p0 });
+    for (const [ax, ay, bx, by, w, dir, speed, alpha] of rec.segs) pen.segment({ x: ax, y: ay }, { x: bx, y: by }, w, dir, { speed, alpha });
+    const s = JSON.parse(JSON.stringify(pen.end()));
+    const v1 = { ...s, v: 1, segs: s.segs.map(g => { const r = g.slice(0, 9); r[8] -= s.t0; return r; }), end: { alpha: 1, t: s.end.t - s.t0 } };
+    delete v1.engine; delete v1.n0;
+    const c = T.canvas(W, H); SUMI.replayStroke(c.ctx, v1);
+    T.eq(T.hash(c.canvas), T.hash(live.canvas));
+  });
+
+  T.test('replay: an error mid-replay rejects done instead of hanging', async () => {
+    SUMI.brushes.boom = { layer: 'ink', start() {}, dab() {}, end() {}, segment() { throw new Error('boom'); } };
+    try {
+      const s = SUMI.recordStroke(T.canvas(50, 50).ctx, { tool: 'fine', seed: 1, p0: { x: 1, y: 1 } });
+      s.segment({ x: 1, y: 1 }, { x: 9, y: 9 }, 2, 0.7);
+      const bad = { ...JSON.parse(JSON.stringify(s.end())), tool: 'boom' };
+      let now = 0; const queue = [];
+      const r = SUMI.replay(T.canvas(50, 50).ctx, [bad], { clock: () => now, frame: cb => queue.push(cb) });
+      while (queue.length) { now += 1e6; queue.shift()(); }
+      const result = await Promise.race([r.done.then(() => 'resolved', e => 'rejected: ' + e.message), new Promise(res => setTimeout(() => res('pending'), 200))]);
+      T.eq(result, 'rejected: boom');
+      const r2 = SUMI.replay(T.canvas(50, 50).ctx, [bad], { frame: () => {} });
+      r2.finish();
+      T.eq(await r2.done.then(() => 'resolved', e => 'rejected: ' + e.message), 'rejected: boom', 'finish');
+    } finally { delete SUMI.brushes.boom; }
   });
 })();

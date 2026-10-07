@@ -140,11 +140,74 @@
     T.eq(n.n1(1.5), 0.5142825469374657); T.eq(n.n2(1.25, 2.5), 0.5910588083788753); T.eq(n.fbm2(0.3, 0.7), 0.586394239986699);
   });
 
-  T.test('brushes: golden pixel hashes (headless raster only)', () => {
+  // keyed by SUMI.BRUSH_ENGINE: a change that alters these hashes must bump the engine version
+  // (and add its hashes here), so recordings say which brushes painted them
+  const GOLDEN = {
+    1: { dry: 'cffaf707', spray: '96fc84e8', fine: '74f81a52', lines: '5c866284', wash: '637dd7f8', shard: '81f0cd31', mask: '3b72f452' },
+  };
+  T.test('brushes: golden pixel hashes for this BRUSH_ENGINE (headless raster only)', () => {
     if (!/Headless/.test(navigator.userAgent)) T.skip('pinned to headless software raster; GPU canvases differ');
-    const want = { dry: 'cffaf707', spray: '96fc84e8', fine: '74f81a52', lines: '5c866284', wash: '637dd7f8', shard: '81f0cd31', mask: '3b72f452' };
+    const want = GOLDEN[SUMI.BRUSH_ENGINE];
+    T.assert(want, 'no golden hashes for BRUSH_ENGINE ' + SUMI.BRUSH_ENGINE);
     const got = {};
     for (const tool of TOOLS) { const c = T.canvas(W, H); play(c.ctx, makeCalls(tool)); got[tool] = T.hash(c.canvas); }
     T.eq(JSON.stringify(got), JSON.stringify(want));
+  });
+
+  T.test('brushes: BRUSH_NAMES lists the built-in brushes', () => {
+    T.eq(JSON.stringify(SUMI.BRUSH_NAMES.slice().sort()), JSON.stringify(TOOLS.slice().sort()));
+  });
+
+  T.test('ink.parseColor rejects malformed numbers', () => {
+    for (const bad of ['rgb(1.2.3,0,0)', 'rgba(0,0,0,.)', 'rgb(.,.,.)']) {
+      let err = null; try { SUMI.ink.parseColor(bad); } catch (e) { err = e; }
+      T.assert(err instanceof TypeError, bad);
+    }
+  });
+
+  // a click with the dry brush, recorded through the pen
+  function dryClick(dabAlpha, endAlpha, wobble = [], dab = true) {
+    const c = T.canvas(200, 200), p = { x: 100, y: 100 };
+    const pen = SUMI.recordStroke(c.ctx, { tool: 'dry', seed: 'click', opts: { ...base(), size: 40, splatter: 0, bleed: 0 }, p0: p });
+    if (dab) pen.dab({ alpha: dabAlpha });
+    let prev = p;
+    for (const q of wobble) { pen.segment(prev, q, 40, Math.atan2(q.y - prev.y, q.x - prev.x)); prev = q; }
+    pen.end({ alpha: endAlpha });
+    return c.canvas;
+  }
+  T.test('dry: a click is drawn with the dab alpha, not the end alpha', () => {
+    const full = T.hash(dryClick(1, 1));
+    T.assert(T.hash(dryClick(0.2, 1)) !== full, 'dab alpha ignored');
+    T.eq(T.hash(dryClick(1, 0.2)), full, 'end alpha leaked into the dab');
+  });
+
+  T.test('dry: a jittery click still leaves its dab', () => {
+    const wobble = [{ x: 100.4, y: 100.3 }, { x: 100.1, y: 100.7 }, { x: 100.6, y: 100.2 }];
+    // if sub-pixel jitter cancelled the dab, this would equal the same wobble with no dab at all
+    T.assert(T.hash(dryClick(1, 1, wobble)) !== T.hash(dryClick(1, 1, wobble, false)), 'jitter cancelled the dab');
+  });
+
+  T.test('wash: edge detail stays the same along a stroke whose width changes', () => {
+    const c = T.canvas(400, 200), counts = [];
+    const moveTo = c.ctx.moveTo.bind(c.ctx), lineTo = c.ctx.lineTo.bind(c.ctx);
+    c.ctx.moveTo = (x, y) => { counts.push(0); moveTo(x, y); };
+    c.ctx.lineTo = (x, y) => { counts[counts.length - 1]++; lineTo(x, y); };
+    const st = SUMI.makeStroke(c.ctx, 'w', { ...base(), size: 40 }), b = SUMI.brushes.wash;
+    b.start(st, { x: 20, y: 100 });
+    for (let i = 0; i < 60; i++) b.segment(st, { x: 20 + i * 6, y: 100 }, { x: 26 + i * 6, y: 100 }, 80 - i * 1.2, 0); // 80 → 8 px wide
+    b.end(st);
+    T.assert(counts.length > 10, 'stamps drawn');
+    T.eq(new Set(counts).size, 1, 'vertex counts per polygon: ' + [...new Set(counts)].join(','));
+  });
+
+  T.test('brushes: the ink.* helpers leave the host ctx as they found it', () => {
+    const c = T.canvas(200, 200); FIX.dirty(c.ctx);
+    const before = FIX.state(c.ctx), o = base(), r = SUMI.makeRng(1);
+    SUMI.ink.spray(c.ctx, r, 100, 100, 0, 30, 0.6, o);
+    SUMI.ink.washBlob(c.ctx, r, 100, 100, 30, 6, o);
+    SUMI.ink.shard(c.ctx, r, 100, 100, 40, 0, o);
+    SUMI.ink.maskDab(c.ctx, 100, 100, 20, true);
+    SUMI.ink.drawSpeedLine(c.ctx, r, 10, 10, 190, 150, o);
+    T.eq(FIX.state(c.ctx), before);
   });
 })();
