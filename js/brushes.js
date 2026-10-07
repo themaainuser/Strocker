@@ -527,14 +527,65 @@ window.SUMI = window.SUMI || {};
   };
 
   // public entry points: sanitise arguments, start from a clean ctx at st.alpha, restore after
-  function guard(brush) {
+  // ---------- painted areas ----------
+  // A conservative box (CSS px, in the ctx's own coordinates) around everything one call can
+  // paint, worked out from each brush's geometry above; computed from the state before the call.
+  // tests/dirty.test.js paints random strokes and checks no pixel ever lands outside.
+  const box = (pts, m) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    return { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m };
+  };
+  const moved = (a, b) => Math.hypot(b.x - a.x, b.y - a.y) >= 0.01;
+  const sprayReach = radius => 3.2 * radius + 4; // mist flies to 3·radius; drops, halos, tails add a little
+  const EXTENT = {
+    dry: {
+      // bristles trail from where they were (previous width), plus bleed, flyaways and splatter
+      segment(st, a, b, w) { const W = Math.max(w, st.extW || 0); st.extW = w; return box([a, b], 1.3 * W + 22); },
+      end(st) { return st.pendingDab ? box([st.pendingDab.p], st.opts.size + 26) : null; },
+    },
+    spray: {
+      segment(st, a, b, w) { return moved(a, b) ? box([b], sprayReach(w * 0.5)) : null; },
+      dab(st, p) { return box([p], sprayReach(st.opts.size * 0.7)); },
+    },
+    fine: { // the curve runs from the previous midpoint through the previous point
+      segment(st, a, b) { return moved(a, b) ? box([st.mid, st.prev, b], 3) : null; },
+      dab(st, p) { return box([p], 3); },
+      end(st) { return st.style ? box([st.mid, st.prev], 3) : null; },
+    },
+    lines: {
+      end(st) { return box([st.p0, ink.snapEnd(st.p0, st.p1, st.wind)], Math.max(0.4, st.opts.size * 0.03) / 2 + 7); },
+    },
+    // stamped brushes: a stamp can land up to the carried distance behind the segment start
+    wash: {
+      segment(st, a, b, w) { return box([a, b], 0.99 * w + 3 + (st.carry || 0)); },
+      dab(st, p) { return box([p], st.opts.size + 3); },
+    },
+    shard: {
+      segment(st, a, b, w) { return box([a, b], 1.5 * w + 12 + (st.carry || 0)); },
+      dab(st, p) { return box([p], 1.5 * st.opts.size + 12); },
+    },
+    mask: {
+      segment(st, a, b) { return box([a, b], st.opts.size / 2 + 2 + (st.carry || 0)); },
+      dab(st, p) { return box([p], st.opts.size / 2 + 2); },
+    },
+  };
+  const grow = (st, r) => {
+    if (!r) return;
+    const d = st.dirty;
+    st.dirty = d ? { x0: Math.min(d.x0, r.x0), y0: Math.min(d.y0, r.y0), x1: Math.max(d.x1, r.x1), y1: Math.max(d.y1, r.y1) } : r;
+  };
+
+  function guard(brush, name) {
     const run = (st, fn) => {
       const c = st.ctx;
       c.save();
       try { baseline(c); c.globalAlpha = alphaOf(st); fn(); } finally { c.restore(); }
     };
+    const extent = (kind, ...args) => (EXTENT[name] && EXTENT[name][kind] ? EXTENT[name][kind](...args) : null);
     return {
       layer: brush.layer,
+      reportsArea: true, // each call adds its painted box to st.dirty
       start(st, p) {
         if (!finitePt(p)) throw new TypeError('start point must have finite x and y');
         run(st, () => brush.start(st, p));
@@ -543,14 +594,25 @@ window.SUMI = window.SUMI || {};
         if (!finitePt(a) || !finitePt(b)) return;
         w = Number.isFinite(w) ? Math.max(0, w) : 0;
         dir = Number.isFinite(dir) ? dir : Math.atan2(b.y - a.y, b.x - a.x);
+        const r = extent('segment', st, a, b, w);
         run(st, () => brush.segment(st, a, b, w, dir));
+        grow(st, r);
       },
-      dab(st, p) { if (finitePt(p)) run(st, () => brush.dab(st, p)); },
-      end(st) { run(st, () => brush.end(st)); },
+      dab(st, p) {
+        if (!finitePt(p)) return;
+        const r = extent('dab', st, p);
+        run(st, () => brush.dab(st, p));
+        grow(st, r);
+      },
+      end(st) {
+        const r = extent('end', st);
+        run(st, () => brush.end(st));
+        grow(st, r);
+      },
     };
   }
   S.brushes = {};
-  for (const name of Object.keys(raw)) S.brushes[name] = guard(raw[name]);
+  for (const name of Object.keys(raw)) S.brushes[name] = guard(raw[name], name);
   S.BRUSH_NAMES = Object.keys(raw); // the built-ins (a host may add its own brushes to S.brushes)
   // export.js inlines this function's own source into standalone HTML files
   (S.modules || (S.modules = {})).brushes = sumiBrushes;

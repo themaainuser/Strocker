@@ -53,6 +53,15 @@ window.SUMI = window.SUMI || {};
     const duration = events.length ? events[events.length - 1].time : 0;
 
     const live = new Array(strokes.length).fill(null);
+    let dirty = null; // union of what the applied calls painted, until takeDirty()
+    const grow = r => {
+      if (!r) return;
+      dirty = dirty ? { x0: Math.min(dirty.x0, r.x0), y0: Math.min(dirty.y0, r.y0), x1: Math.max(dirty.x1, r.x1), y1: Math.max(dirty.y1, r.y1) } : r;
+    };
+    const collect = (st, brush) => {
+      if (!brush.reportsArea) { grow(S.EVERYWHERE); return; }
+      grow(st.dirty); st.dirty = null;
+    };
     function apply({ s, kind, i }) {
       const stroke = strokes[s], brush = brushFor(stroke.tool);
       if (kind === 'start') {
@@ -69,6 +78,7 @@ window.SUMI = window.SUMI || {};
         st.speed = speed; st.alpha = alpha;
         brush.segment(st, { x: ax, y: ay }, { x: bx, y: by }, w, dir);
       } else { st.alpha = stroke.end.alpha; brush.end(st); live[s] = null; }
+      collect(st, brush);
     }
 
     let pos = 0, now = -Infinity;
@@ -77,6 +87,8 @@ window.SUMI = window.SUMI || {};
       get total() { return events.length; },
       get position() { return pos; },
       get done() { return pos >= events.length; },
+      // the box painted by the calls applied since the last takeDirty() (null if none)
+      takeDirty() { const r = dirty; dirty = null; return r; },
       // forward-only: apply every call due by t; returns true once everything is drawn
       seek(t) {
         if (t > now) {

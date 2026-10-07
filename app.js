@@ -19,7 +19,7 @@ const S = { ...SUMI.defaultOpts(), tool: 'dry', wind: -35, seed: newSeed(), grai
 
 let layers = null;
 let drawing = false, activeId = null, pen = null, last = null, lastW = 0, lastT = 0, smoothV = 0;
-let preview = null; // speed-line rubber band
+let preview = null, previewBox = null; // speed-line rubber band and the box it covers on the board
 let undoStack = [], undoBudget = UNDO_BYTES;
 let strokes = []; // every hand stroke still on the canvas, as replayable records (js/recorder.js)
 // what the strokes sit on that isn't recorded: the last generated poster / filled mask
@@ -176,16 +176,19 @@ function strokeTo(p) {
     const b = { x: last.x + (p.x - last.x) * t1, y: last.y + (p.y - last.y) * t1 };
     pen.segment(a, b, lastW + (w - lastW) * t1, dir, { speed: sn, alpha });
   }
+  layers.markArea(pen.takeDirty(), SUMI.brushes[tool].layer); // only the box the brush painted is redrawn
   if (tool === 'lines') {
     const p0 = pen.stroke.p0, e = SUMI.ink.snapEnd(p0, p, windRad());
     preview = c => {
       c.strokeStyle = 'rgba(17,19,24,0.6)'; c.lineWidth = 1; c.setLineDash([6, 5]);
       c.beginPath(); c.moveTo(p0.x, p0.y); c.lineTo(e.x, e.y); c.stroke(); c.setLineDash([]);
     };
+    clearPreview(); // the old line's box, so it's erased
+    previewBox = { x0: Math.min(p0.x, e.x) - 2, y0: Math.min(p0.y, e.y) - 2, x1: Math.max(p0.x, e.x) + 2, y1: Math.max(p0.y, e.y) + 2 };
+    layers.markArea(previewBox);
   }
   cursorSize(w);
   last = p; lastW = w; lastT = now;
-  layers.markDirty(SUMI.brushes[tool].layer);
 }
 
 // one stroke at a time, from one pointer: extra fingers, other buttons and stray events are
@@ -206,7 +209,7 @@ canvas.addEventListener('pointerdown', e => {
   drawing = true; // only once the pen exists, so a failed start can't break every later move
   activeId = e.pointerId;
   pen.dab({ alpha: 1 });
-  layers.markDirty(layer);
+  layers.markArea(pen.takeDirty(), layer);
 });
 canvas.addEventListener('pointermove', e => {
   const p = pos(e);
@@ -226,16 +229,22 @@ function endStroke() {
   if (!drawing) return;
   drawing = false; activeId = null;
   const stroke = pen.end({ alpha: 1 });
+  layers.markArea(pen.takeDirty(), SUMI.brushes[stroke.tool].layer);
   strokes.push(stroke);
   pen = null;
   preview = null;
-  layers.markDirty(SUMI.brushes[stroke.tool].layer);
+  clearPreview();
   refreshButtons(); // replay button follows the recording; fill-mask follows the mask
   log(stroke.tool, `${stroke.opts.size}px · ${stroke.opts.color}`);
 }
 // drop the active stroke without recording it (its undo entry restores the pixels)
 function abortStroke() {
-  drawing = false; activeId = null; pen = null; preview = null;
+  drawing = false; activeId = null; pen = null; preview = null; previewBox = null; // undo redraws everything
+}
+// redraw the board under the rubber-band line so it disappears
+function clearPreview() {
+  if (previewBox) layers.markArea(previewBox);
+  previewBox = null;
 }
 
 // ---------- generator ----------
@@ -313,7 +322,7 @@ function replay({ speed = +$('replaySpeed').value, timing = $('replayTiming').va
   const recs = strokes.slice();
   log('replay', `${recs.length} strokes · ${speed}× · ${timing}`);
   const r = SUMI.replay(s => layers.get(SUMI.brushes[s.tool].layer).ctx, recs,
-    { ...playbackShape(timing), speed, onFrame: () => layers.markDirty() });
+    { ...playbackShape(timing), speed, onFrame: tl => layers.markArea(tl.takeDirty(), ...ALL_LAYERS) });
   return startRun(r, 'replay', completed => { if (completed) toastMsg('replay done'); });
 }
 function fillMask() {

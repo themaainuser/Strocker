@@ -19,6 +19,8 @@
 window.SUMI = window.SUMI || {};
 (function sumiRecorder(S) {
   S.STROKE_FORMAT = 2;
+  // the painted area of a brush that doesn't report one: assume it may have painted anywhere
+  S.EVERYWHERE = Object.freeze({ x0: -Infinity, y0: -Infinity, x1: Infinity, y1: Infinity });
 
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const finitePt = p => !!p && finite(p.x) && finite(p.y);
@@ -90,8 +92,15 @@ window.SUMI = window.SUMI || {};
     brush.start(st, stroke.p0);
 
     const open = () => { if (stroke.end) throw new Error('stroke already ended'); };
+    let touched = false; // for brushes that don't report areas
     return {
       stroke, // grows as the pen moves; final once end() returns it — treat it as read-only
+      // the box painted since the last call (null if nothing), so a host can redraw just that;
+      // brushes that don't report areas give an infinite box (redraw everything)
+      takeDirty() {
+        if (!brush.reportsArea) { const r = touched ? S.EVERYWHERE : null; touched = false; return r; }
+        const r = st.dirty || null; st.dirty = null; return r;
+      },
       // the touch-down mark: once, and only before the first segment (replays put it there)
       dab({ alpha = 1 } = {}) {
         open();
@@ -100,6 +109,7 @@ window.SUMI = window.SUMI || {};
         stroke.dab = { alpha: unit(alpha, 1), t: now(), n: ++calls };
         st.alpha = stroke.dab.alpha;
         brush.dab(st, stroke.p0);
+        touched = true;
       },
       // stores what the brush actually receives: the same clamps brushes apply, made JSON-safe
       segment(a, b, w, dir, { speed = 0, alpha = 1 } = {}) {
@@ -112,12 +122,14 @@ window.SUMI = window.SUMI || {};
         stroke.segs.push([a.x, a.y, b.x, b.y, w, dir, speed, alpha, now(), ++calls]);
         st.speed = speed; st.alpha = alpha;
         brush.segment(st, { x: a.x, y: a.y }, { x: b.x, y: b.y }, w, dir);
+        touched = true;
       },
       end({ alpha = 1 } = {}) {
         if (stroke.end) return stroke;
         stroke.end = { alpha: unit(alpha, 1), t: now(), n: ++calls };
         st.alpha = stroke.end.alpha;
         brush.end(st);
+        touched = true;
         return stroke;
       },
     };

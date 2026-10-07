@@ -1,6 +1,6 @@
 /*! SUMI brushes — drop-in build (classic script: global SUMI)
  * Ink brushes (dry, spray, fine, lines, wash, shard, mask) + stroke recorder + replay.
- * Brush engine 1 · stroke format 2 · sources 2dd1c44315e6
+ * Brush engine 1 · stroke format 2 · sources 9aff02f6a6d1
  * Built by tools/build-dist.mjs from js/rng.js, js/brushes.js, js/recorder.js, js/playback.js — edit those, not this file.
  * For pixel-identical replay, record and replay on canvases created with
  * getContext('2d', { willReadFrequently: true }). Docs: README.md "Drop-in file".
@@ -607,14 +607,65 @@ window.SUMI = window.SUMI || {};
   };
 
   // public entry points: sanitise arguments, start from a clean ctx at st.alpha, restore after
-  function guard(brush) {
+  // ---------- painted areas ----------
+  // A conservative box (CSS px, in the ctx's own coordinates) around everything one call can
+  // paint, worked out from each brush's geometry above; computed from the state before the call.
+  // tests/dirty.test.js paints random strokes and checks no pixel ever lands outside.
+  const box = (pts, m) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    return { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m };
+  };
+  const moved = (a, b) => Math.hypot(b.x - a.x, b.y - a.y) >= 0.01;
+  const sprayReach = radius => 3.2 * radius + 4; // mist flies to 3·radius; drops, halos, tails add a little
+  const EXTENT = {
+    dry: {
+      // bristles trail from where they were (previous width), plus bleed, flyaways and splatter
+      segment(st, a, b, w) { const W = Math.max(w, st.extW || 0); st.extW = w; return box([a, b], 1.3 * W + 22); },
+      end(st) { return st.pendingDab ? box([st.pendingDab.p], st.opts.size + 26) : null; },
+    },
+    spray: {
+      segment(st, a, b, w) { return moved(a, b) ? box([b], sprayReach(w * 0.5)) : null; },
+      dab(st, p) { return box([p], sprayReach(st.opts.size * 0.7)); },
+    },
+    fine: { // the curve runs from the previous midpoint through the previous point
+      segment(st, a, b) { return moved(a, b) ? box([st.mid, st.prev, b], 3) : null; },
+      dab(st, p) { return box([p], 3); },
+      end(st) { return st.style ? box([st.mid, st.prev], 3) : null; },
+    },
+    lines: {
+      end(st) { return box([st.p0, ink.snapEnd(st.p0, st.p1, st.wind)], Math.max(0.4, st.opts.size * 0.03) / 2 + 7); },
+    },
+    // stamped brushes: a stamp can land up to the carried distance behind the segment start
+    wash: {
+      segment(st, a, b, w) { return box([a, b], 0.99 * w + 3 + (st.carry || 0)); },
+      dab(st, p) { return box([p], st.opts.size + 3); },
+    },
+    shard: {
+      segment(st, a, b, w) { return box([a, b], 1.5 * w + 12 + (st.carry || 0)); },
+      dab(st, p) { return box([p], 1.5 * st.opts.size + 12); },
+    },
+    mask: {
+      segment(st, a, b) { return box([a, b], st.opts.size / 2 + 2 + (st.carry || 0)); },
+      dab(st, p) { return box([p], st.opts.size / 2 + 2); },
+    },
+  };
+  const grow = (st, r) => {
+    if (!r) return;
+    const d = st.dirty;
+    st.dirty = d ? { x0: Math.min(d.x0, r.x0), y0: Math.min(d.y0, r.y0), x1: Math.max(d.x1, r.x1), y1: Math.max(d.y1, r.y1) } : r;
+  };
+
+  function guard(brush, name) {
     const run = (st, fn) => {
       const c = st.ctx;
       c.save();
       try { baseline(c); c.globalAlpha = alphaOf(st); fn(); } finally { c.restore(); }
     };
+    const extent = (kind, ...args) => (EXTENT[name] && EXTENT[name][kind] ? EXTENT[name][kind](...args) : null);
     return {
       layer: brush.layer,
+      reportsArea: true, // each call adds its painted box to st.dirty
       start(st, p) {
         if (!finitePt(p)) throw new TypeError('start point must have finite x and y');
         run(st, () => brush.start(st, p));
@@ -623,14 +674,25 @@ window.SUMI = window.SUMI || {};
         if (!finitePt(a) || !finitePt(b)) return;
         w = Number.isFinite(w) ? Math.max(0, w) : 0;
         dir = Number.isFinite(dir) ? dir : Math.atan2(b.y - a.y, b.x - a.x);
+        const r = extent('segment', st, a, b, w);
         run(st, () => brush.segment(st, a, b, w, dir));
+        grow(st, r);
       },
-      dab(st, p) { if (finitePt(p)) run(st, () => brush.dab(st, p)); },
-      end(st) { run(st, () => brush.end(st)); },
+      dab(st, p) {
+        if (!finitePt(p)) return;
+        const r = extent('dab', st, p);
+        run(st, () => brush.dab(st, p));
+        grow(st, r);
+      },
+      end(st) {
+        const r = extent('end', st);
+        run(st, () => brush.end(st));
+        grow(st, r);
+      },
     };
   }
   S.brushes = {};
-  for (const name of Object.keys(raw)) S.brushes[name] = guard(raw[name]);
+  for (const name of Object.keys(raw)) S.brushes[name] = guard(raw[name], name);
   S.BRUSH_NAMES = Object.keys(raw); // the built-ins (a host may add its own brushes to S.brushes)
   // export.js inlines this function's own source into standalone HTML files
   (S.modules || (S.modules = {})).brushes = sumiBrushes;
@@ -658,6 +720,8 @@ window.SUMI = window.SUMI || {};
 window.SUMI = window.SUMI || {};
 (function sumiRecorder(S) {
   S.STROKE_FORMAT = 2;
+  // the painted area of a brush that doesn't report one: assume it may have painted anywhere
+  S.EVERYWHERE = Object.freeze({ x0: -Infinity, y0: -Infinity, x1: Infinity, y1: Infinity });
 
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const finitePt = p => !!p && finite(p.x) && finite(p.y);
@@ -729,8 +793,15 @@ window.SUMI = window.SUMI || {};
     brush.start(st, stroke.p0);
 
     const open = () => { if (stroke.end) throw new Error('stroke already ended'); };
+    let touched = false; // for brushes that don't report areas
     return {
       stroke, // grows as the pen moves; final once end() returns it — treat it as read-only
+      // the box painted since the last call (null if nothing), so a host can redraw just that;
+      // brushes that don't report areas give an infinite box (redraw everything)
+      takeDirty() {
+        if (!brush.reportsArea) { const r = touched ? S.EVERYWHERE : null; touched = false; return r; }
+        const r = st.dirty || null; st.dirty = null; return r;
+      },
       // the touch-down mark: once, and only before the first segment (replays put it there)
       dab({ alpha = 1 } = {}) {
         open();
@@ -739,6 +810,7 @@ window.SUMI = window.SUMI || {};
         stroke.dab = { alpha: unit(alpha, 1), t: now(), n: ++calls };
         st.alpha = stroke.dab.alpha;
         brush.dab(st, stroke.p0);
+        touched = true;
       },
       // stores what the brush actually receives: the same clamps brushes apply, made JSON-safe
       segment(a, b, w, dir, { speed = 0, alpha = 1 } = {}) {
@@ -751,12 +823,14 @@ window.SUMI = window.SUMI || {};
         stroke.segs.push([a.x, a.y, b.x, b.y, w, dir, speed, alpha, now(), ++calls]);
         st.speed = speed; st.alpha = alpha;
         brush.segment(st, { x: a.x, y: a.y }, { x: b.x, y: b.y }, w, dir);
+        touched = true;
       },
       end({ alpha = 1 } = {}) {
         if (stroke.end) return stroke;
         stroke.end = { alpha: unit(alpha, 1), t: now(), n: ++calls };
         st.alpha = stroke.end.alpha;
         brush.end(st);
+        touched = true;
         return stroke;
       },
     };
@@ -822,6 +896,15 @@ window.SUMI = window.SUMI || {};
     const duration = events.length ? events[events.length - 1].time : 0;
 
     const live = new Array(strokes.length).fill(null);
+    let dirty = null; // union of what the applied calls painted, until takeDirty()
+    const grow = r => {
+      if (!r) return;
+      dirty = dirty ? { x0: Math.min(dirty.x0, r.x0), y0: Math.min(dirty.y0, r.y0), x1: Math.max(dirty.x1, r.x1), y1: Math.max(dirty.y1, r.y1) } : r;
+    };
+    const collect = (st, brush) => {
+      if (!brush.reportsArea) { grow(S.EVERYWHERE); return; }
+      grow(st.dirty); st.dirty = null;
+    };
     function apply({ s, kind, i }) {
       const stroke = strokes[s], brush = brushFor(stroke.tool);
       if (kind === 'start') {
@@ -838,6 +921,7 @@ window.SUMI = window.SUMI || {};
         st.speed = speed; st.alpha = alpha;
         brush.segment(st, { x: ax, y: ay }, { x: bx, y: by }, w, dir);
       } else { st.alpha = stroke.end.alpha; brush.end(st); live[s] = null; }
+      collect(st, brush);
     }
 
     let pos = 0, now = -Infinity;
@@ -846,6 +930,8 @@ window.SUMI = window.SUMI || {};
       get total() { return events.length; },
       get position() { return pos; },
       get done() { return pos >= events.length; },
+      // the box painted by the calls applied since the last takeDirty() (null if none)
+      takeDirty() { const r = dirty; dirty = null; return r; },
       // forward-only: apply every call due by t; returns true once everything is drawn
       seek(t) {
         if (t > now) {
