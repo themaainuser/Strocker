@@ -23,8 +23,12 @@ function available(c) {
   try { execFileSync(c, ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
 }
 
+if (process.env.SUMI_BROWSER && !available(process.env.SUMI_BROWSER)) {
+  console.error(`SUMI_BROWSER is set but not runnable: ${process.env.SUMI_BROWSER}`);
+  process.exit(1);
+}
 // a browser can be installed but broken (e.g. Edge mid-update returns an empty DOM),
-// so pages fall through to the next candidate until one produces a summary
+// so pages fall through to the next candidate when a browser returns nothing at all
 const browsers = candidates.filter(available);
 if (!browsers.length) {
   console.error('no Edge/Chrome found — set SUMI_BROWSER to a Chromium-based browser');
@@ -55,8 +59,10 @@ function runPage(rel) {
   let dom = '';
   while (browsers.length) {
     dom = dumpDom(browsers[0], url);
-    if (dom.includes('id="summary" data-')) break;
-    console.error(`[${rel}] no summary from ${browsers[0]} — trying the next browser`);
+    // a page came back: the browser works, so a missing summary means the page itself crashed
+    // or timed out — report that rather than retrying elsewhere
+    if (dom.includes('id="summary"')) break;
+    console.error(`[${rel}] ${browsers[0]} returned no page — trying the next browser`);
     browsers.shift();
   }
   for (const m of dom.matchAll(/<li class="(fail|skip)">([\s\S]*?)<\/li>/g)) {

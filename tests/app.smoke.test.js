@@ -171,3 +171,34 @@ T.test('app: a browser that cannot encode WebM gets a message, not an error', as
   T.assert(/cannot encode WebM/.test(a.w.document.getElementById('toast').textContent), 'toast explains');
   T.assert(!btn.disabled && btn.textContent.includes('WebM'), 'button ready again');
 });
+T.test('app: undo memory stays within its byte budget', async () => {
+  const a = await app(), L = a.app.layers, layerBytes = L.get('ink').canvas.width * L.get('ink').canvas.height * 4;
+  a.app.setUndoBudget(3 * layerBytes);
+  a.app.setTool('fine');
+  for (let i = 0; i < 6; i++) drag(a, line(50, 50 + i * 10, 300, 50 + i * 10, 4));
+  T.eq(a.app.undoDepth(), 3, 'stroke entries kept');
+  T.assert(a.app.undoBytes() <= 3 * layerBytes, 'bytes ' + a.app.undoBytes());
+  await a.app.generate({ animate: false }).done; // one entry bigger than the whole budget
+  T.eq(a.app.undoDepth(), 1, 'the newest entry is always kept');
+  a.app.undo(); T.eq(inked(a, 'ink') > 0, true, 'undo of generate still works');
+});
+T.test('app: the panel does not re-serialise the whole recording per stroke', async () => {
+  const a = await app(); a.app.setTool('fine');
+  for (let i = 0; i < 5; i++) drag(a, line(50, 50 + i * 10, 300, 50 + i * 10, 4));
+  const JSONs = a.w.JSON, seen = [];
+  const orig = JSONs.stringify;
+  JSONs.stringify = function (v, ...rest) { seen.push(Array.isArray(v) ? v.length : 0); return orig.call(this, v, ...rest); };
+  try { drag(a, line(50, 300, 300, 300, 4)); } finally { JSONs.stringify = orig; }
+  T.assert(!seen.some(n => n >= 6), 'stringified an array of ' + Math.max(...seen) + ' strokes');
+  T.assert(a.w.document.getElementById('recCount').textContent.startsWith('6 strokes'), a.w.document.getElementById('recCount').textContent);
+});
+T.test('app: the board shows a new wash stroke and an undo right away (no stale cache)', async () => {
+  const a = await app(), ctx = a.board.getContext('2d'), d = a.app.layers.dpr;
+  const px = () => Array.from(ctx.getImageData(300 * d, 300 * d, 1, 1).data.slice(0, 3)).join();
+  a.app.renderNow(); const paper = px();
+  a.app.setTool('dry'); drag(a, line(100, 100, 200, 120)); a.app.renderNow(); // an ink stroke first: the wash cache is built
+  a.app.setTool('wash'); drag(a, line(250, 300, 350, 300)); a.app.renderNow();
+  T.assert(px() !== paper, 'wash not shown on the board');
+  a.app.undo(); a.app.renderNow();
+  T.eq(px(), paper, 'undone wash still shown');
+});

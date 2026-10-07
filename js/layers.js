@@ -40,26 +40,36 @@ window.SUMI = window.SUMI || {};
   }
 
   S.createLayers = function (w, h, dpr = 1) {
-    const L = { w, h, dpr, dirty: true };
+    const L = { w, h, dpr, dirty: true, stats: { granulations: 0, tints: 0 } };
     const layers = {};
-    let scratch, pattern;
+    // per-layer change counters: the granulated wash and the mask tint are only rebuilt when
+    // their layer changed, not on every frame (the granulation pass is the costly one)
+    const version = {};
+    let washCache, tintCache, pattern, washSeen = -1, tintSeen = -1;
 
     function setup(name) {
       const canvas = makeCanvas(L.w * L.dpr, L.h * L.dpr);
       const ctx = canvas.getContext('2d', CPU);
       ctx.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
       layers[name] = { canvas, ctx };
+      version[name] = 0;
     }
-    function setupScratch() {
-      scratch = makeCanvas(L.w * L.dpr, L.h * L.dpr);
-      pattern = scratch.getContext('2d', CPU).createPattern(granulationTile(), 'repeat');
+    function setupCaches() {
+      washCache = makeCanvas(L.w * L.dpr, L.h * L.dpr);
+      tintCache = makeCanvas(L.w * L.dpr, L.h * L.dpr);
+      pattern = washCache.getContext('2d', CPU).createPattern(granulationTile(), 'repeat');
+      tintCache.getContext('2d', CPU);
       if (pattern.setTransform) pattern.setTransform(new DOMMatrix().scale(L.dpr));
+      washSeen = tintSeen = -1;
     }
     for (const n of ALL) setup(n);
-    setupScratch();
+    setupCaches();
+    const changed = names => { for (const n of names) version[n]++; L.dirty = true; };
 
     L.get = name => layers[name];
-    L.markDirty = () => { L.dirty = true; };
+    L.version = name => version[name];
+    // markDirty('ink') after drawing on one layer; markDirty() when unsure (all layers changed)
+    L.markDirty = (...names) => changed(names.length ? names : ALL);
 
     L.clear = names => {
       for (const n of names) {
@@ -68,7 +78,7 @@ window.SUMI = window.SUMI || {};
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.restore();
       }
-      L.dirty = true;
+      changed(names);
     };
 
     // resizes in place: the same canvas and ctx objects stay valid, so a stroke or a run that
@@ -85,8 +95,8 @@ window.SUMI = window.SUMI || {};
         ctx.drawImage(old, 0, 0, canvas.width, canvas.height);
         ctx.setTransform(dpr2, 0, 0, dpr2, 0, 0);
       }
-      setupScratch();
-      L.dirty = true;
+      setupCaches();
+      changed(ALL);
     };
 
     L.isMaskEmpty = () => {
@@ -103,7 +113,7 @@ window.SUMI = window.SUMI || {};
       const snap = {};
       for (const n of names) {
         const src = layers[n].canvas, copy = makeCanvas(src.width, src.height);
-        copy.getContext('2d').drawImage(src, 0, 0);
+        copy.getContext('2d', CPU).drawImage(src, 0, 0); // CPU: a memory copy, not a GPU round trip
         snap[n] = copy;
       }
       return snap;
@@ -117,12 +127,45 @@ window.SUMI = window.SUMI || {};
         ctx.drawImage(snap[n], 0, 0, canvas.width, canvas.height);
         ctx.restore();
       }
-      L.dirty = true;
+      changed(Object.keys(snap));
     };
+
+    // wash with granules lifted out of the pigment; rebuilt only when the wash changed
+    function granulatedWash() {
+      if (washSeen !== version.wash) {
+        const c = washCache.getContext('2d');
+        c.globalCompositeOperation = 'source-over';
+        c.clearRect(0, 0, washCache.width, washCache.height);
+        c.drawImage(layers.wash.canvas, 0, 0);
+        c.globalCompositeOperation = 'destination-out';
+        c.globalAlpha = GRANULATION;
+        c.fillStyle = pattern;
+        c.fillRect(0, 0, washCache.width, washCache.height);
+        c.globalAlpha = 1;
+        c.globalCompositeOperation = 'source-over';
+        washSeen = version.wash;
+        L.stats.granulations++;
+      }
+      return washCache;
+    }
+    function maskTint() {
+      if (tintSeen !== version.mask) {
+        const c = tintCache.getContext('2d');
+        c.globalCompositeOperation = 'source-over';
+        c.clearRect(0, 0, tintCache.width, tintCache.height);
+        c.drawImage(layers.mask.canvas, 0, 0);
+        c.globalCompositeOperation = 'source-in';
+        c.fillStyle = MASK_TINT;
+        c.fillRect(0, 0, tintCache.width, tintCache.height);
+        c.globalCompositeOperation = 'source-over';
+        tintSeen = version.mask;
+        L.stats.tints++;
+      }
+      return tintCache;
+    }
 
     L.composite = (ctx, { showMask = false, preview = null } = {}) => {
       const W = ctx.canvas.width, H = ctx.canvas.height;
-      const sc = scratch.getContext('2d');
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;
@@ -130,33 +173,14 @@ window.SUMI = window.SUMI || {};
       ctx.fillStyle = S.PAPER;
       ctx.fillRect(0, 0, W, H);
 
-      // wash: lift granules out of the pigment, then glaze it over the paper
-      sc.globalCompositeOperation = 'source-over';
-      sc.clearRect(0, 0, scratch.width, scratch.height);
-      sc.drawImage(layers.wash.canvas, 0, 0);
-      sc.globalCompositeOperation = 'destination-out';
-      sc.globalAlpha = GRANULATION;
-      sc.fillStyle = pattern;
-      sc.fillRect(0, 0, scratch.width, scratch.height);
-      sc.globalAlpha = 1;
-      sc.globalCompositeOperation = 'source-over';
-
+      // wash glazed over the paper, then the scene, ink and shards
       ctx.globalCompositeOperation = 'multiply';
-      ctx.drawImage(scratch, 0, 0, W, H);
+      ctx.drawImage(granulatedWash(), 0, 0, W, H);
       ctx.drawImage(layers.scene.canvas, 0, 0, W, H);
       ctx.globalCompositeOperation = 'source-over';
       ctx.drawImage(layers.ink.canvas, 0, 0, W, H);
       ctx.drawImage(layers.fx.canvas, 0, 0, W, H);
-
-      if (showMask) {
-        sc.clearRect(0, 0, scratch.width, scratch.height);
-        sc.drawImage(layers.mask.canvas, 0, 0);
-        sc.globalCompositeOperation = 'source-in';
-        sc.fillStyle = MASK_TINT;
-        sc.fillRect(0, 0, scratch.width, scratch.height);
-        sc.globalCompositeOperation = 'source-over';
-        ctx.drawImage(scratch, 0, 0, W, H);
-      }
+      if (showMask) ctx.drawImage(maskTint(), 0, 0, W, H);
       ctx.restore();
 
       if (preview) {

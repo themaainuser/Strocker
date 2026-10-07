@@ -12,6 +12,7 @@ const $ = id => document.getElementById(id);
 const TOOLS = ['dry', 'spray', 'fine', 'lines', 'wash', 'shard', 'mask'];
 const ALL_LAYERS = [...SUMI.LAYER_NAMES, 'mask'];
 const UNDO_LIMIT = 15;
+const UNDO_BYTES = 256 * 1024 * 1024; // undo snapshots are full-size canvases: cap their memory too
 const newSeed = () => Math.random().toString(36).slice(2, 8);
 
 const S = { ...SUMI.defaultOpts(), tool: 'dry', wind: -35, seed: newSeed(), grain: 60, paper: true };
@@ -19,7 +20,7 @@ const S = { ...SUMI.defaultOpts(), tool: 'dry', wind: -35, seed: newSeed(), grai
 let layers = null;
 let drawing = false, activeId = null, pen = null, last = null, lastW = 0, lastT = 0, smoothV = 0;
 let preview = null; // speed-line rubber band
-let undoStack = [];
+let undoStack = [], undoBudget = UNDO_BYTES;
 let strokes = []; // every hand stroke still on the canvas, as replayable records (js/recorder.js)
 // what the strokes sit on that isn't recorded: the last generated poster / filled mask
 // (a snapshot of wash, scene, ink, fx). Replay paints the strokes on top of it.
@@ -47,9 +48,11 @@ function log(head, rest = '') {
   while (logEl.children.length > 40) logEl.lastChild.remove();
 }
 // the export panel shows the real recording: the last stroke exactly as stored
+const strokeSize = new WeakMap(); // a stroke's JSON length, measured once (records don't change after end)
+const sizeOf = s => { let n = strokeSize.get(s); if (n === undefined) { n = JSON.stringify(s).length + 1; strokeSize.set(s, n); } return n; };
 function refreshExport() {
   const n = strokes.length, last = strokes[n - 1];
-  const kb = n ? (JSON.stringify(strokes).length / 1024).toFixed(1) + ' KB' : '';
+  const kb = n ? (strokes.reduce((t, s) => t + sizeOf(s), 1) / 1024).toFixed(1) + ' KB' : '';
   $('recCount').textContent = (n === 1 ? '1 stroke · ' + kb : n + ' strokes' + (n ? ' · ' + kb : '')) +
     (base ? ' · poster not exported' : ''); // Replay keeps the poster; exports hold the strokes only
   $('btnExportJSON').disabled = $('btnExportHTML').disabled = !n;
@@ -119,9 +122,14 @@ function renderNow() {
 
 // ---------- undo ----------
 // an undo entry restores the pixels, the recording and the replay base together
+const snapBytes = snap => Object.values(snap).reduce((n, c) => n + c.width * c.height * 4, 0);
+const undoBytes = () => undoStack.reduce((n, e) => n + e.bytes, 0);
+function trimUndo() {
+  while (undoStack.length > UNDO_LIMIT || (undoStack.length > 1 && undoBytes() > undoBudget)) undoStack.shift();
+}
 function pushEntry(snap) {
-  undoStack.push({ snap, strokes: strokes.slice(), base });
-  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  undoStack.push({ snap, strokes: strokes.slice(), base, bytes: snapBytes(snap) });
+  trimUndo();
 }
 const pushUndo = names => pushEntry(layers.snapshot(names));
 function undo() {
@@ -177,7 +185,7 @@ function strokeTo(p) {
   }
   cursorSize(w);
   last = p; lastW = w; lastT = now;
-  layers.markDirty();
+  layers.markDirty(SUMI.brushes[tool].layer);
 }
 
 // one stroke at a time, from one pointer: extra fingers, other buttons and stray events are
@@ -198,7 +206,7 @@ canvas.addEventListener('pointerdown', e => {
   drawing = true; // only once the pen exists, so a failed start can't break every later move
   activeId = e.pointerId;
   pen.dab({ alpha: 1 });
-  layers.markDirty();
+  layers.markDirty(layer);
 });
 canvas.addEventListener('pointermove', e => {
   const p = pos(e);
@@ -221,7 +229,7 @@ function endStroke() {
   strokes.push(stroke);
   pen = null;
   preview = null;
-  layers.markDirty();
+  layers.markDirty(SUMI.brushes[stroke.tool].layer);
   refreshButtons(); // replay button follows the recording; fill-mask follows the mask
   log(stroke.tool, `${stroke.opts.size}px · ${stroke.opts.color}`);
 }
@@ -326,10 +334,16 @@ function clearMask() {
   strokes = strokes.filter(s => SUMI.brushes[s.tool].layer !== 'mask');
   refreshButtons();
 }
+let maskSeen = -1, maskEmpty = true;
+function maskIsEmpty() {
+  const v = layers.version('mask');
+  if (v !== maskSeen) { maskSeen = v; maskEmpty = layers.isMaskEmpty(); }
+  return maskEmpty;
+}
 function refreshButtons() {
   if (!layers) return;
   refreshExport();
-  $('btnFillMask').disabled = busy || layers.isMaskEmpty();
+  $('btnFillMask').disabled = busy || maskIsEmpty();
   // while busy the replay button is the Stop button, so it stays enabled
   $('btnReplay').textContent = busy && run && run.finish ? '■ Stop' : '▶ Replay';
   $('btnReplay').disabled = busy ? !(run && run.finish) : !strokes.length;
@@ -341,7 +355,7 @@ function setTool(name) {
   S.tool = name;
   document.querySelectorAll('#brushGrid button').forEach(b => b.classList.toggle('active', b.dataset.brush === name));
   cursor.classList.toggle('mask', name === 'mask');
-  if (layers) layers.markDirty(); // mask tint follows the tool
+  if (layers) layers.dirty = true; // recomposite: the mask tint follows the tool
 }
 document.querySelectorAll('#brushGrid button').forEach(b => b.onclick = () => {
   setTool(b.dataset.brush);
@@ -497,5 +511,7 @@ SUMI.app = {
   setTool, generate, replay, cancel: cancelRun, undo, fillMask, clearMask, renderNow,
   exportJSON, exportHTML, exportWebM,
   undoDepth: () => undoStack.length,
+  undoBytes,
+  setUndoBudget(bytes) { undoBudget = bytes; trimUndo(); },
   strokes: () => strokes.slice(),
 };

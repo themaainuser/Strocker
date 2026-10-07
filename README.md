@@ -121,7 +121,7 @@ readback. The app's paint layers are CPU canvases for this reason.
 | 6 | Shard | Torn-paper chips with jagged edges, a shaded fold and a partial ink outline. |
 | 7 | Mask | Paints the silhouette (`Alt` erases). |
 
-Shortcuts: `1–7` brush · `[` `]` size · `Ctrl+Z` undo (15 steps). Shortcuts are ignored
+Shortcuts: `1–7` brush · `[` `]` size · `Ctrl+Z` undo (up to 15 steps or 256 MB of snapshots). Shortcuts are ignored
 while typing in the seed field. **↓ PNG** exports paper, all paint layers, grain and the stamp.
 
 ## Files

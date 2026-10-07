@@ -50,3 +50,36 @@ T.test('layers: paint layers use the CPU rasteriser so recorded strokes replay i
   L.resize(60, 50, 1);
   T.eq(L.get('ink').ctx.getContextAttributes().willReadFrequently, true, 'after resize');
 });
+T.test('layers: composite reuses the granulated wash and mask tint until those layers change', () => {
+  const L = SUMI.createLayers(120, 80, 1), out = T.canvas(120, 80);
+  L.get('wash').ctx.fillStyle = '#5a6d7e'; L.get('wash').ctx.fillRect(0, 0, 60, 80);
+  L.get('mask').ctx.fillRect(60, 0, 60, 80);
+  L.markDirty();
+  L.composite(out.ctx, { showMask: true });
+  const g0 = L.stats.granulations, t0 = L.stats.tints, first = T.hash(out.canvas);
+  L.get('ink').ctx.fillRect(5, 5, 4, 4); L.markDirty('ink');
+  L.composite(out.ctx, { showMask: true });
+  T.eq(L.stats.granulations, g0, 'ink change re-granulated the wash'); T.eq(L.stats.tints, t0, 'ink change rebuilt the tint');
+  T.assert(T.hash(out.canvas) !== first, 'ink change not shown');
+  L.get('wash').ctx.fillRect(60, 0, 20, 80); L.markDirty('wash');
+  L.composite(out.ctx, { showMask: true });
+  T.eq(L.stats.granulations, g0 + 1, 'wash change not re-granulated');
+  L.get('mask').ctx.clearRect(60, 0, 30, 80); L.markDirty('mask');
+  L.composite(out.ctx, { showMask: true });
+  T.eq(L.stats.tints, t0 + 1, 'mask change not re-tinted');
+  for (const change of [() => L.clear(['wash']), () => L.restore(L.snapshot(['wash'])), () => L.resize(130, 90, 1), () => L.markDirty()]) {
+    const before = L.stats.granulations; change(); L.composite(out.ctx);
+    T.eq(L.stats.granulations, before + 1, 'not re-granulated after ' + change.toString());
+  }
+});
+T.test('layers: cached composite matches a fresh one', () => {
+  const draw = L => { L.get('wash').ctx.fillStyle = '#5a6d7e'; L.get('wash').ctx.fillRect(10, 10, 80, 50); L.get('ink').ctx.fillRect(20, 20, 30, 30); };
+  const A = SUMI.createLayers(120, 80, 1), B = SUMI.createLayers(120, 80, 1), a = T.canvas(120, 80), b = T.canvas(120, 80);
+  draw(A); A.markDirty(); A.composite(a.ctx); A.markDirty('ink'); A.composite(a.ctx); // second pass uses the cache
+  draw(B); B.markDirty(); B.composite(b.ctx);
+  T.eq(T.hash(a.canvas), T.hash(b.canvas));
+});
+T.test('layers: snapshots are CPU canvases', () => {
+  const L = SUMI.createLayers(40, 30, 1), snap = L.snapshot(['ink', 'wash']);
+  for (const n in snap) T.eq(snap[n].getContext('2d').getContextAttributes().willReadFrequently, true, n);
+});
