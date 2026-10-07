@@ -44,10 +44,9 @@ window.SUMI = window.SUMI || {};
     const layers = {};
     let scratch, pattern;
 
-    function setup(name, old) {
+    function setup(name) {
       const canvas = makeCanvas(L.w * L.dpr, L.h * L.dpr);
       const ctx = canvas.getContext('2d', CPU);
-      if (old) ctx.drawImage(old, 0, 0, canvas.width, canvas.height);
       ctx.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
       layers[name] = { canvas, ctx };
     }
@@ -56,7 +55,7 @@ window.SUMI = window.SUMI || {};
       pattern = scratch.getContext('2d', CPU).createPattern(granulationTile(), 'repeat');
       if (pattern.setTransform) pattern.setTransform(new DOMMatrix().scale(L.dpr));
     }
-    for (const n of ALL) setup(n, null);
+    for (const n of ALL) setup(n);
     setupScratch();
 
     L.get = name => layers[name];
@@ -72,10 +71,20 @@ window.SUMI = window.SUMI || {};
       L.dirty = true;
     };
 
+    // resizes in place: the same canvas and ctx objects stay valid, so a stroke or a run that
+    // holds a ctx keeps drawing onto the live layer
     L.resize = (w2, h2, dpr2 = L.dpr) => {
       if (!(w2 >= 1 && h2 >= 1)) return; // hidden/collapsed board: keep what we have
+      if (w2 === L.w && h2 === L.h && dpr2 === L.dpr) return;
       L.w = w2; L.h = h2; L.dpr = dpr2;
-      for (const n of ALL) setup(n, layers[n].canvas);
+      for (const n of ALL) {
+        const { canvas, ctx } = layers[n];
+        const old = makeCanvas(canvas.width, canvas.height);
+        old.getContext('2d', CPU).drawImage(canvas, 0, 0);
+        canvas.width = Math.max(1, Math.round(w2 * dpr2)); canvas.height = Math.max(1, Math.round(h2 * dpr2));
+        ctx.drawImage(old, 0, 0, canvas.width, canvas.height);
+        ctx.setTransform(dpr2, 0, 0, dpr2, 0, 0);
+      }
       setupScratch();
       L.dirty = true;
     };

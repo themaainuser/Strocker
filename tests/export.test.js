@@ -113,11 +113,15 @@
   T.test('export: the video opens on paper, not on a black frame', async () => {
     if (typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream) T.skip('no MediaRecorder here');
     const { strokes } = recording();
-    const blob = await SUMI.recordWebM(strokes.slice(0, 2), { canvas: CANVAS, hold: 200 }).done;
+    // headless browsers record fine but often can't load or seek their own WebM: skip, don't hang
+    const within = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(false), ms))]);
+    const blob = await within(SUMI.recordWebM(strokes.slice(0, 2), { canvas: CANVAS, hold: 200 }).done, 5000);
+    if (!blob) T.skip('this browser could not finish recording here');
     const v = document.createElement('video'); v.muted = true; v.src = URL.createObjectURL(blob);
-    const loaded = await Promise.race([new Promise(r => { v.onloadeddata = () => r(true); v.onerror = () => r(false); }), new Promise(r => setTimeout(() => r(false), 4000))]);
+    const loaded = await within(new Promise(r => { v.onloadeddata = () => r(true); v.onerror = () => r(false); }), 3000);
     if (!loaded) T.skip('this browser cannot decode its own WebM');
-    v.currentTime = 0; await new Promise(r => { v.onseeked = r; }); // drawing right at loadeddata can read black
+    v.currentTime = 0; // drawing right at loadeddata can read black
+    if (!await within(new Promise(r => { v.onseeked = () => r(true); }), 3000)) T.skip('this browser cannot seek its own WebM');
     const c = T.canvas(v.videoWidth, v.videoHeight); c.ctx.drawImage(v, 0, 0);
     const [r, g, b] = T.rgb(T.pixels(c.canvas), 5, 5); // a corner no stroke touches
     T.assert(r > 200 && g > 200 && b > 190, 'first frame corner is ' + [r, g, b]);

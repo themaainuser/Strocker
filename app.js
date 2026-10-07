@@ -17,12 +17,15 @@ const newSeed = () => Math.random().toString(36).slice(2, 8);
 const S = { ...SUMI.defaultOpts(), tool: 'dry', wind: -35, seed: newSeed(), grain: 60, paper: true };
 
 let layers = null;
-let drawing = false, pen = null, last = null, lastW = 0, lastT = 0, smoothV = 0;
+let drawing = false, activeId = null, pen = null, last = null, lastW = 0, lastT = 0, smoothV = 0;
 let preview = null; // speed-line rubber band
 let undoStack = [];
 let strokes = []; // every hand stroke still on the canvas, as replayable records (js/recorder.js)
+// what the strokes sit on that isn't recorded: the last generated poster / filled mask
+// (a snapshot of wash, scene, ink, fx). Replay paints the strokes on top of it.
+let base = null;
 const sessionStart = performance.now();
-let run = null, busy = false;
+let run = null, busy = false; // run.kind is 'generate' or 'replay'
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const windRad = () => S.wind * Math.PI / 180;
@@ -47,7 +50,8 @@ function log(head, rest = '') {
 function refreshExport() {
   const n = strokes.length, last = strokes[n - 1];
   const kb = n ? (JSON.stringify(strokes).length / 1024).toFixed(1) + ' KB' : '';
-  $('recCount').textContent = n === 1 ? '1 stroke · ' + kb : n + ' strokes' + (n ? ' · ' + kb : '');
+  $('recCount').textContent = (n === 1 ? '1 stroke · ' + kb : n + ' strokes' + (n ? ' · ' + kb : '')) +
+    (base ? ' · poster not exported' : ''); // Replay keeps the poster; exports hold the strokes only
   $('btnExportJSON').disabled = $('btnExportHTML').disabled = !n;
   $('btnExportWebM').disabled = !n || !!videoJob || !CAN_RECORD_VIDEO;
   if (!n) {
@@ -66,6 +70,7 @@ function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = Math.floor(r.width), h = Math.floor(r.height);
   if (w < 1 || h < 1) return;
+  if (layers && w === layers.w && h === layers.h && dpr === layers.dpr) return; // nothing changed
   canvas.width = w * dpr; canvas.height = h * dpr;
   grainCanvas.width = w * dpr; grainCanvas.height = h * dpr;
   gtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -111,19 +116,26 @@ function renderNow() {
 }
 
 // ---------- undo ----------
-function pushUndo(names) {
-  undoStack.push({ snap: layers.snapshot(names), strokes: strokes.slice() });
+// an undo entry restores the pixels, the recording and the replay base together
+function pushEntry(snap) {
+  undoStack.push({ snap, strokes: strokes.slice(), base });
   if (undoStack.length > UNDO_LIMIT) undoStack.shift();
 }
+const pushUndo = names => pushEntry(layers.snapshot(names));
 function undo() {
+  if (drawing) abortStroke(); // the top entry is this stroke's own: popping it cancels the stroke
+  else cancelRun();
   const entry = undoStack.pop();
   if (!entry) return toastMsg('nothing to undo');
-  cancelRun();
   layers.restore(entry.snap);
   strokes = entry.strokes;
+  base = entry.base;
   refreshButtons();
   toastMsg('undo');
 }
+// every action that changes the canvas first ends the active stroke and settles any run,
+// so the recording and the canvas can't drift apart
+function settle() { endStroke(); cancelRun(); }
 
 // ---------- painting ----------
 function pos(e) {
@@ -146,14 +158,15 @@ function strokeTo(p) {
   const w = lastW + (target - lastW) * 0.4;
   const steps = Math.max(1, Math.floor(dist / 2.5));
   const dir = Math.atan2(p.y - last.y, p.x - last.x);
-  const alpha = S.tool === 'mask' ? 1 : 1 - react * 0.45 * sn; // fast = lighter ink
+  const tool = pen.stroke.tool; // the stroke's own tool, even if a hotkey switched tools mid-stroke
+  const alpha = tool === 'mask' ? 1 : 1 - react * 0.45 * sn; // fast = lighter ink
   for (let i = 1; i <= steps; i++) {
     const t0 = (i - 1) / steps, t1 = i / steps;
     const a = { x: last.x + (p.x - last.x) * t0, y: last.y + (p.y - last.y) * t0 };
     const b = { x: last.x + (p.x - last.x) * t1, y: last.y + (p.y - last.y) * t1 };
     pen.segment(a, b, lastW + (w - lastW) * t1, dir, { speed: sn, alpha });
   }
-  if (S.tool === 'lines') {
+  if (tool === 'lines') {
     const p0 = pen.stroke.p0, e = SUMI.ink.snapEnd(p0, p, windRad());
     preview = c => {
       c.strokeStyle = 'rgba(17,19,24,0.6)'; c.lineWidth = 1; c.setLineDash([6, 5]);
@@ -165,8 +178,11 @@ function strokeTo(p) {
   layers.markDirty();
 }
 
+// one stroke at a time, from one pointer: extra fingers, other buttons and stray events are
+// ignored, and every way a stroke can stop (release, cancel, lost capture, blur, a mouse
+// released outside the window) ends it the same way, so it is always recorded
 canvas.addEventListener('pointerdown', e => {
-  if (busy || !layers) return;
+  if (busy || !layers || drawing || e.button !== 0) return;
   try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointers can't be captured */ }
   const layer = SUMI.brushes[S.tool].layer;
   pushUndo([layer]);
@@ -178,6 +194,7 @@ canvas.addEventListener('pointerdown', e => {
     origin: sessionStart, canvas: { w: layers.w, h: layers.h, dpr: layers.dpr },
   });
   drawing = true; // only once the pen exists, so a failed start can't break every later move
+  activeId = e.pointerId;
   pen.dab({ alpha: 1 });
   layers.markDirty();
 });
@@ -185,87 +202,123 @@ canvas.addEventListener('pointermove', e => {
   const p = pos(e);
   cursor.style.left = p.x + 'px'; cursor.style.top = p.y + 'px';
   if (!drawing) { cursorSize(S.size); return; }
+  if (e.pointerId !== activeId) return;
+  if (e.pointerType === 'mouse' && e.buttons === 0) { endStroke(); return; } // released outside the window
   strokeTo(p);
 });
-addEventListener('pointerup', () => {
+const endIfActive = e => { if (drawing && e.pointerId === activeId) endStroke(); };
+addEventListener('pointerup', endIfActive);
+addEventListener('pointercancel', endIfActive);
+canvas.addEventListener('lostpointercapture', endIfActive);
+addEventListener('blur', () => endStroke());
+
+function endStroke() {
   if (!drawing) return;
-  drawing = false;
-  strokes.push(pen.end({ alpha: 1 }));
+  drawing = false; activeId = null;
+  const stroke = pen.end({ alpha: 1 });
+  strokes.push(stroke);
   pen = null;
   preview = null;
   layers.markDirty();
   refreshButtons(); // replay button follows the recording; fill-mask follows the mask
-  log(S.tool, `${S.size}px · ${S.color}`);
-});
+  log(stroke.tool, `${stroke.opts.size}px · ${stroke.opts.color}`);
+}
+// drop the active stroke without recording it (its undo entry restores the pixels)
+function abortStroke() {
+  drawing = false; activeId = null; pen = null; preview = null;
+}
 
 // ---------- generator ----------
 function setBusy(b) {
   busy = b;
-  $('btnGenerate').textContent = b ? '■ Cancel' : '✦ Generate';
+  const generating = b && run && run.kind === 'generate';
+  $('btnGenerate').textContent = generating ? '■ Cancel' : '✦ Generate';
+  $('btnGenerate').disabled = b && !generating; // during a replay, Replay's own button is the Stop
   $('btnReroll').disabled = b;
   refreshButtons();
+}
+// bookkeeping when a run stops, however it stops (finished, cancelled, failed); runs once
+function afterRun(r) {
+  if (r.settled) return;
+  r.settled = true;
+  if (r.kind === 'generate') base = layers.snapshot(SUMI.LAYER_NAMES); // the poster as far as it got
+  layers.markDirty();
 }
 function cancelRun() {
   if (!run) return;
   const r = run;
   run = null;
-  if (r.finish) r.finish(); else r.cancel(); // an interrupted replay completes, so the canvas matches the recording
-  setBusy(false);
+  try {
+    if (r.finish) r.finish(); else r.cancel(); // an interrupted replay completes, so the canvas matches the recording
+  } finally {
+    afterRun(r);
+    setBusy(false);
+  }
+}
+function startRun(r, kind, onDone) {
+  r.kind = kind;
+  run = r;
+  setBusy(true);
+  r.done.then(result => {
+    if (run !== r) return; // a newer run (or a cancel) owns the state now
+    run = null;
+    afterRun(r);
+    setBusy(false);
+    onDone(result);
+  }, err => {
+    if (run === r) run = null;
+    afterRun(r);
+    setBusy(false);
+    toastMsg(kind + ' failed: ' + (err && err.message));
+  });
+  return r;
 }
 function generate({ animate = true } = {}) {
-  cancelRun();
+  settle();
   pushUndo(SUMI.LAYER_NAMES);
-  strokes = strokes.filter(s => SUMI.brushes[s.tool].layer === 'mask'); // the poster replaces everything else
+  // the poster replaces everything but the mask, right away, so the canvas and the
+  // recording agree even if the run is cancelled before its first frame
+  strokes = strokes.filter(s => SUMI.brushes[s.tool].layer === 'mask');
+  layers.clear(SUMI.LAYER_NAMES);
+  base = null;
   S.seed = $('seedInput').value.trim() || newSeed();
   $('seedInput').value = S.seed;
-  setBusy(true);
   log('generate', `seed "${S.seed}" · wind ${S.wind}°`);
   const r = SUMI.generate({
     layers, seed: S.seed, wind: windRad(), inkEdge: $('chkInkEdge').checked, animate,
     onLog: m => log(m.split('(')[0], m.slice(m.indexOf('(') + 1, -1)),
   });
-  run = r;
-  r.done.then(() => {
-    if (run !== r) return; // a newer run (or a cancel) owns the state now
-    run = null;
-    setBusy(false);
-    layers.markDirty();
-    toastMsg('poster ready — seed ' + S.seed);
-  });
-  return r;
+  return startRun(r, 'generate', () => toastMsg('poster ready — seed ' + S.seed));
 }
 const playbackShape = timing => (timing === 'sequence' ? { timing, gap: 150 } : timing === 'overlap' ? { timing, stagger: 0 } : { timing });
 
-// repaint the recorded strokes on a clean sheet, animated (js/playback.js); undoable
+// repaint the recorded strokes, animated (js/playback.js), on top of the generated poster /
+// filled mask if there is one; undoable
 function replay({ speed = +$('replaySpeed').value, timing = $('replayTiming').value } = {}) {
   if (!strokes.length) { toastMsg('nothing recorded yet'); return null; }
-  cancelRun();
+  settle();
   pushUndo(ALL_LAYERS);
   layers.clear(ALL_LAYERS);
+  if (base) layers.restore(base);
   const recs = strokes.slice();
-  const shape = playbackShape(timing);
   log('replay', `${recs.length} strokes · ${speed}× · ${timing}`);
   const r = SUMI.replay(s => layers.get(SUMI.brushes[s.tool].layer).ctx, recs,
-    { ...shape, speed, onFrame: () => layers.markDirty() });
-  run = r;
-  setBusy(true);
-  r.done.then(completed => {
-    if (run !== r) return;
-    run = null;
-    setBusy(false);
-    layers.markDirty();
-    if (completed) toastMsg('replay done');
-  });
-  return r;
+    { ...playbackShape(timing), speed, onFrame: () => layers.markDirty() });
+  return startRun(r, 'replay', completed => { if (completed) toastMsg('replay done'); });
 }
 function fillMask() {
-  if (busy) return;
+  settle();
   if (layers.isMaskEmpty()) return toastMsg('paint a mask first (key 7)');
-  pushUndo(['scene']);
+  const before = layers.snapshot(['scene']);
   const g = SUMI.fillMask({ layers, seed: $('seedInput').value.trim() || S.seed });
+  if (!g) return toastMsg('the mask is too small or faint to fill — paint a bigger one');
+  pushEntry(before);
+  base = { ...(base || {}), ...layers.snapshot(['scene']) }; // Replay keeps the filled scene
+  refreshButtons();
   log('scene.fill', `towers ${g.bridge.towers.length} · pylons ${g.pylons.length}`);
 }
 function clearMask() {
+  settle();
   pushUndo(['mask']);
   layers.clear(['mask']);
   strokes = strokes.filter(s => SUMI.brushes[s.tool].layer !== 'mask');
@@ -319,7 +372,8 @@ function updateLabels() {
 }
 
 $('btnGenerate').onclick = () => {
-  if (busy) { cancelRun(); toastMsg('cancelled'); } else generate();
+  if (busy && run && run.kind === 'generate') { cancelRun(); toastMsg('cancelled'); }
+  else if (!busy) generate();
 };
 $('btnReroll').onclick = () => { $('seedInput').value = newSeed(); generate(); };
 $('seedInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !busy) generate(); });
@@ -334,10 +388,11 @@ $('btnPaper').onclick = e => {
 };
 $('btnUndo').onclick = undo;
 $('btnClear').onclick = () => {
-  cancelRun();
+  settle();
   pushUndo(ALL_LAYERS);
   layers.clear(ALL_LAYERS);
   strokes = [];
+  base = null;
   refreshButtons();
   toastMsg('cleared');
 };
@@ -412,11 +467,12 @@ addEventListener('keydown', e => {
   const typing = t && (t.isContentEditable || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' ||
     (t.tagName === 'INPUT' && !['range', 'checkbox', 'color', 'button'].includes(t.type)));
   if (typing) return;
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return; // browser / OS shortcuts (Ctrl+1 switches tabs)
   const n = Number(e.key);
   if (Number.isInteger(n) && n >= 1 && n <= TOOLS.length) setTool(TOOLS[n - 1]);
   if (e.key === '[') { S.size = clamp(S.size - 6, 2, 140); $('s-size').value = S.size; updateLabels(); }
   if (e.key === ']') { S.size = clamp(S.size + 6, 2, 140); $('s-size').value = S.size; updateLabels(); }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
 });
 
 // ---------- render loop + fps ----------

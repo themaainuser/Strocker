@@ -4,8 +4,19 @@ function loadApp() { return new Promise((res, rej) => {
     catch (e) { e.name === 'SecurityError' ? res(null) : rej(e); } };
   document.body.appendChild(f); }); }
 async function app() { const a = await loadApp(); if (!a) T.skip('iframe blocked on file:// — use node tests/run.mjs'); return a; }
-function drag(a, pts, extra = {}) { const r = a.board.getBoundingClientRect(), ev = (type, p) => a.board.dispatchEvent(new a.w.PointerEvent(type, { clientX: r.left + p.x, clientY: r.top + p.y, pointerId: 1, bubbles: true, ...extra }));
-  ev('pointerdown', pts[0]); for (const p of pts.slice(1)) ev('pointermove', p); a.w.dispatchEvent(new a.w.PointerEvent('pointerup', { pointerId: 1 })); }
+// pointer events with the fields real input carries (type, id, button, buttons)
+function ptr(a, type, p, init = {}) {
+  const r = a.board.getBoundingClientRect(), down = type === 'pointerdown' || type === 'pointermove';
+  a.board.dispatchEvent(new a.w.PointerEvent(type, {
+    clientX: r.left + (p ? p.x : 0), clientY: r.top + (p ? p.y : 0), bubbles: true,
+    pointerId: 1, pointerType: 'mouse', button: type === 'pointermove' ? -1 : 0, buttons: down ? 1 : 0, ...init,
+  }));
+}
+function drag(a, pts, extra = {}) {
+  ptr(a, 'pointerdown', pts[0], extra);
+  for (const p of pts.slice(1)) ptr(a, 'pointermove', p, extra);
+  a.w.dispatchEvent(new a.w.PointerEvent('pointerup', { pointerId: extra.pointerId || 1, pointerType: extra.pointerType || 'mouse', bubbles: true }));
+}
 const line = (x0, y0, x1, y1, n = 30) => Array.from({ length: n + 1 }, (_, i) => ({ x: x0 + (x1 - x0) * i / n, y: y0 + (y1 - y0) * i / n }));
 const inked = (a, name) => T.inkCount(T.pixels(a.app.layers.get(name).canvas), 0, 0, 1e5, 1e5);
 
@@ -30,8 +41,25 @@ T.test('app: fill mask disabled until a mask exists', async () => {
   a.app.setTool('mask'); drag(a, line(200, 200, 260, 260, 6)); T.assert(!btn.disabled, 'should enable');
 });
 T.test('app: second generate cancels the first', async () => {
-  const a = await app(); a.app.generate(); await a.app.generate({ animate: false }).done;
+  const a = await app(), L = a.app.layers, names = ['wash', 'scene', 'ink', 'fx'];
+  const hashes = () => names.map(n => T.hash(L.get(n).canvas)).join();
+  // off-screen file:// iframes get throttled frames and timers, so frames are queued and
+  // flushed by hand: a first run that wasn't really cancelled would visibly keep painting
+  const frames = [];
+  a.w.requestAnimationFrame = cb => frames.push(cb);
+  const flush = n => { for (let i = 0; i < n && frames.length; i++) frames.shift()(a.w.performance.now()); };
+  // the runner's virtual time barely moves inside a task, so a frame's 12 ms budget would never
+  // run out; a clock that jumps 20 ms per reading makes every frame do one step
+  let fake = a.w.performance.now();
+  a.w.performance.now = () => (fake += 20);
+  a.app.generate();
+  flush(1); // the first run paints one frame…
+  T.assert(frames.length > 0, 'first run finished in one frame: nothing left to check');
+  await a.app.generate({ animate: false }).done;
   T.assert(!a.app.busy, 'still busy'); T.assert(inked(a, 'ink') > 0);
+  const after = hashes();
+  flush(400);
+  T.eq(hashes(), after, 'canvas changed after the second generate finished');
 });
 T.test('app: undo history capped at 15', async () => {
   const a = await app(); a.app.setTool('fine'); for (let i = 0; i < 20; i++) drag(a, line(50, 50 + i * 10, 300, 50 + i * 10, 4));
