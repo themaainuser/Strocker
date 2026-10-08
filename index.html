@@ -123,13 +123,19 @@
     <div class="section console">
       <label class="section-title">recording & export <span id="fps">60 fps</span></label>
       <div class="rec-head"><b id="recCount">0 strokes</b><span>stroke format v2</span></div>
-      <pre id="codeOut"></pre>
       <div class="row btn-row">
         <button id="btnExportJSON" class="ghost" disabled title="The recording as JSON (sumi-strokes document, v2 strokes)">↓ JSON</button>
         <button id="btnExportHTML" class="ghost" disabled title="One HTML file that replays the strokes, nothing else needed">↓ HTML</button>
         <button id="btnExportWebM" class="ghost" disabled title="A video of the replay, recorded in real time at the replay speed">↓ WebM</button>
       </div>
-      <div id="log"></div>
+      <details class="advanced" id="advanced">
+        <summary>Advanced · stroke data &amp; activity log</summary>
+        <div class="section">
+          <pre id="codeOut"></pre>
+          <p class="adv-label">activity log <i>newest first: each stroke's brush · size · ink</i></p>
+          <div id="log"></div>
+        </div>
+      </details>
     </div>
 
     <p class="hint">drag to paint · <kbd>1–7</kbd> brush · <kbd>[</kbd><kbd>]</kbd> size · <kbd>ctrl+z</kbd> undo · <kbd>alt</kbd> erase mask<br/>no libraries — canvas2d only</p>

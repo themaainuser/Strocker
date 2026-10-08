@@ -126,8 +126,10 @@ Animation frames pause in background tabs, so a replay in a hidden tab waits.
 
 ## Export
 
-The **recording & export** panel shows how many strokes are recorded and their size, plus
-the last stroke exactly as stored. Three downloads:
+The **recording & export** panel shows how many strokes are recorded and their size. Under
+**Advanced** (closed by default) are the last stroke exactly as stored and the activity log:
+newest first, one line per stroke (brush · size · ink) and per Generate, Replay or export.
+Three downloads:
 
 | Button | What you get |
 |---|---|
