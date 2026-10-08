@@ -286,6 +286,7 @@ tests/run.mjs     headless runner
 tests/standalone.html   brush library without the poster modules
 tests/stroke-fixtures.js   a stroke recorded as plain data + replay helper
 tests/dist*.html   the library tests again, against each drop-in build
+bench/index.html  benchmark page (bench/bench.js); tools/bench.mjs runs it headless
 ```
 
 All files are classic scripts on a `window.SUMI` namespace (no ES modules), so the page
@@ -310,3 +311,47 @@ to choose a Chromium-based browser yourself. It prints failures plus a summary; 
 1 means a failure. The tests cover the RNG and noise, layers, every brush, contour tracing,
 scene geometry, generator determinism and cancel, and app smoke tests that drive
 `index.html` in an iframe.
+
+## Benchmark
+
+```bash
+node tools/bench.mjs
+```
+
+The runner serves the repo locally and opens `bench/index.html` in headless Edge or Chrome,
+in real time (the test runner uses virtual time, which would freeze the clock). The page is
+cross-origin isolated, so `performance.now()` ticks in 5 µs steps instead of 100 µs. A run
+takes about 90 s and prints the report; `--json results.json` also saves the raw numbers.
+Opened through any local server, `bench/index.html` shows the same report on the page, with
+the coarser clock.
+
+It measures the library and `export.js`, not the app's layers or compositing. Strokes are
+drawn the way the app draws them: a dab on touch-down, one `pen.move` per 60 Hz pointer
+event, end on release. Each move is followed by a 1-pixel read, so the canvas raster is
+counted. The report covers:
+- the building blocks: RNG, noise, `makeStroke`, pen dynamics
+- each brush's time per 12 px move, by size (12, 34, 80), pixel density (1×, 2×) and quality
+- the app's cost meter, checked against the Quality table above
+- one 1,800-move stroke per brush: cost at its start and end, recording size, and whether a
+  replay matches the live pixels
+- 21 mixed strokes replayed frame by frame at 1×, 4×, 8× and all at once
+- 120 strokes through every export and import path
+- WebM rendered frame by frame at 1× and 2×
+
+Measured on 2026-10-08 on a laptop (Intel i5-11400H) in headless Edge 154. The same page ran
+20–35% faster in the Claude desktop app's built-in browser.
+- Every brush draws a move well inside a 60 fps frame (16.7 ms). The slowest is spray at
+  Full quality: about 3.2 ms per move at size 34 and 5 ms at size 80.
+- A long stroke costs the same per move at its end as at its start.
+- Replays matched the live drawing pixel for pixel in all 22 checks.
+- 1,800 moves record as 40.5 KB of JSON, 16.3 KB gzipped.
+- Exporting 120 strokes takes under 35 ms in every format. WebM renders 6× faster than real
+  time at 1× and about 2× at 2×.
+
+Known weak spots:
+- At 8× replay speed, 7% (1×) to 11% (2×) of frames take longer than 16.7 ms while spray
+  strokes play. At 4× it is under 0.5%. WebM export is unaffected.
+- Drawing a recording all at once re-runs every brush call: 120 strokes (60,537 calls) took
+  3.7–4.9 s, and the page doesn't respond meanwhile.
+- Small spray and wash are not cheaper. Spray throws the same number of drops at every size,
+  and wash stamps every 0.4 × its width, so a size-12 wash costs more than a size-34 one.
