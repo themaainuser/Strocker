@@ -168,9 +168,12 @@ Measured first: uploading whole CPU layers to the board every frame cost ~10 ms 
 Brush pixels are unchanged: no `BRUSH_ENGINE` bump. 2× wash frame ~68 → ~3 ms, 2× ink frame
 ~13 → ~2 ms, 1× painting ~8–14 → ~0.4–3 ms.
 
-Open:
-- **Exports.** The standalone HTML player and the WebM recorder still composite full frames;
-  the same approach would apply there.
+Exports (done 2026-10-08, branch `perf/export-area`): the stage shared by the HTML player
+and the WebM recorder (`sumiStage` in `export.js`) got the same area redraw, built into the
+stage itself because exported files carry no `layers.js`. A test plays an exported file frame
+by frame and checks each frame against a full redraw, byte for byte. Two deliberately broken
+versions, one skipping the shard layer and one with the wrong wash blend, were caught.
+1200×800 player, one frame's redraw including the upload: 1× 3.9 → 0.7 ms, 2× 25 → 1.8 ms.
 
 ## Spray and wash quality options (done 2026-10-08, branch `feat/quality-controls`)
 

@@ -138,7 +138,7 @@ the last stroke exactly as stored. Three downloads:
 The HTML player draws the same layers as the app: wash multiplied onto the paper, then
 ink, then shards. Its layer pixels match the app's in the same browser. Mask strokes are
 left out, and the HTML has no paper grain or wash granulation, so it looks slightly flatter
-than the app.
+than the app. Each frame redraws only the area its strokes painted (see Rendering).
 
 Exporting works from `file://` too: each core file registers its module function in
 `SUMI.modules`, and the export inlines that function's source text instead of fetching the
@@ -229,8 +229,9 @@ still redraw the whole board.
 At 2× pixel density this cut a wash frame from about 68 ms to 3 ms and an ink frame from
 about 13 ms to 2 ms. Brush pixels did not change, so saved strokes replay identically.
 
-**Not yet area-based:** the standalone HTML player and the WebM recorder still redraw full
-frames.
+**Exports too.** The standalone HTML player and the WebM recorder redraw only each replay
+frame's box in the same way. In a 1200×800 player, a frame's redraw went from about
+3.9 ms to 0.7 ms at 1× and from 25 ms to 1.8 ms at 2×, counting the upload to the screen.
 
 ## Files
 

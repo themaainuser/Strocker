@@ -4,13 +4,14 @@
   const W = 320, H = 220, CANVAS = { w: W, h: H, dpr: 1 };
   const LAYERS = ['wash', 'ink', 'fx'];
 
-  // strokes recorded live into per-layer canvases (like the app); the mask stroke must not show up in exports
-  function recording() {
+  // strokes recorded live into per-layer canvases (like the app); the mask stroke must not show up in exports.
+  // `clock` spaces the calls in time (the headless clock stands still, so otherwise they share one instant)
+  function recording(clock) {
     const live = {}; for (const n of [...LAYERS, 'mask']) live[n] = T.canvas(W, H);
     const strokes = [];
     ['wash', 'dry', 'spray', 'shard', 'fine', 'mask'].forEach((tool, i) => {
       const c = makeCalls(tool), layer = SUMI.brushes[tool].layer;
-      const pen = SUMI.recordStroke(live[layer].ctx, { tool, seed: c.seed + i, opts: c.opts, wind: c.wind, p0: c.p0, canvas: CANVAS });
+      const pen = SUMI.recordStroke(live[layer].ctx, { tool, seed: c.seed + i, opts: c.opts, wind: c.wind, p0: c.p0, canvas: CANVAS, ...(clock && { clock }) });
       pen.dab();
       for (const [ax, ay, bx, by, w, dir, speed, alpha] of c.segs) pen.segment({ x: ax, y: ay }, { x: bx, y: by }, w, dir, { speed, alpha });
       strokes.push(pen.end());
@@ -132,6 +133,35 @@
     T.eq(T.hash(w.SUMI_PLAYER.layers.ink), T.hash(live.ink.canvas), 'finish completes it');
     w.document.querySelector('canvas').dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
     T.assert(w.SUMI_PLAYER.run.timeline.position < w.SUMI_PLAYER.run.timeline.total, 'click restarts the playback');
+  });
+
+  T.test('export: the player redraws only what each frame painted, byte-identical to a full redraw', async () => {
+    let t = 0;
+    const { strokes } = recording(() => (t += 16.7)); // painted at 60 calls a second
+    const w = await loadHTML(SUMI.standaloneHTML(strokes, { canvas: CANVAS, speed: 1, timing: 'sequence', gap: 0 }));
+    if (!w) T.skip('iframe blocked on file:// — use node tests/run.mjs');
+    const P = w.SUMI_PLAYER, view = w.document.querySelector('canvas');
+    // frames by hand, and a clock that moves 40 ms per reading, so each frame applies a few calls
+    const frames = [];
+    w.requestAnimationFrame = cb => frames.push(cb);
+    let fake = w.performance.now();
+    w.performance.now = () => (fake += 40);
+    const run = P.play(); // restarts under the queued frames
+    const ref = w.document.createElement('canvas'); ref.width = view.width; ref.height = view.height;
+    const full0 = P.stats.full, area0 = P.stats.area;
+    let n = 0;
+    while (frames.length && n < 1000) {
+      frames.shift()(fake);
+      P.composite(ref.getContext('2d')); // the full picture, beside the view
+      T.eq(T.hash(view), T.hash(ref), 'frame ' + n);
+      n++;
+    }
+    T.assert(run.timeline.done, 'played to the end in ' + n + ' frames');
+    T.eq(P.stats.full - full0, 0, 'no full redraws while playing');
+    T.assert(P.stats.area - area0 > 20, 'area frames: ' + (P.stats.area - area0) + ' of ' + n);
+    // an area nobody can bound (a brush that doesn't report one) redraws everything; none redraws nothing
+    P.update(null); T.eq(P.stats.full - full0, 0);
+    P.update({ x0: -Infinity, y0: -Infinity, x1: Infinity, y1: Infinity }); T.eq(P.stats.full - full0, 1);
   });
 
   T.test('export: options are checked before writing a file', () => {

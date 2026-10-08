@@ -49,6 +49,7 @@ window.SUMI = window.SUMI || {};
   // Compositing stage shared by the HTML player and the video recorder: per-layer CPU canvases
   // like the app (wash multiplied onto paper, then ink, then fx). Mask strokes are an authoring
   // aid and are left out. Self-contained so its source can be inlined into exported files.
+  // Replay frames redraw only the box their calls painted, as the app does (js/layers.js).
   function sumiStage(S, data, view) {
     const { w, h, dpr } = data.canvas;
     view.width = Math.round(w * dpr); view.height = Math.round(h * dpr);
@@ -61,18 +62,52 @@ window.SUMI = window.SUMI || {};
     };
     const layers = { wash: layer(), ink: layer(), fx: layer() };
     const strokes = data.strokes.filter(s => S.brushes[s.tool].layer in layers);
-    const composite = () => {
+    const stats = { full: 0, area: 0 };
+    // the whole picture, onto the view or (for a copy) another canvas of the same size
+    const composite = (ctx = vctx) => {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = data.paper;
+      ctx.fillRect(0, 0, view.width, view.height);
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.drawImage(layers.wash, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(layers.ink, 0, 0);
+      ctx.drawImage(layers.fx, 0, 0);
+      ctx.restore();
+      if (ctx === vctx) stats.full++;
+    };
+    // Redraws box r (CSS px, as playback reports it) with the same blends. Each layer's box is
+    // copied into a small scratch canvas with get/putImageData (drawImage would make the browser
+    // snapshot the whole layer), so only the box is uploaded. An unbounded box redraws it all.
+    let scratch = null;
+    const update = r => {
+      if (!r) return;
+      if (![r.x0, r.y0, r.x1, r.y1].every(Number.isFinite)) { composite(); return; }
+      const x0 = Math.max(0, Math.floor(r.x0 * dpr) - 1), y0 = Math.max(0, Math.floor(r.y0 * dpr) - 1);
+      const x1 = Math.min(view.width, Math.ceil(r.x1 * dpr) + 1), y1 = Math.min(view.height, Math.ceil(r.y1 * dpr) + 1);
+      if (x1 <= x0 || y1 <= y0) return;
+      const bw = x1 - x0, bh = y1 - y0;
+      if (!scratch || scratch.width !== bw || scratch.height !== bh) {
+        scratch = document.createElement('canvas'); scratch.width = bw; scratch.height = bh;
+      }
+      const sc = scratch.getContext('2d', { willReadFrequently: true });
+      const put = (src, op) => {
+        sc.putImageData(src.getContext('2d').getImageData(x0, y0, bw, bh), 0, 0);
+        vctx.globalCompositeOperation = op;
+        vctx.drawImage(scratch, x0, y0);
+      };
       vctx.save();
       vctx.setTransform(1, 0, 0, 1, 0, 0);
       vctx.globalCompositeOperation = 'source-over';
       vctx.fillStyle = data.paper;
-      vctx.fillRect(0, 0, view.width, view.height);
-      vctx.globalCompositeOperation = 'multiply';
-      vctx.drawImage(layers.wash, 0, 0);
-      vctx.globalCompositeOperation = 'source-over';
-      vctx.drawImage(layers.ink, 0, 0);
-      vctx.drawImage(layers.fx, 0, 0);
+      vctx.fillRect(x0, y0, bw, bh);
+      put(layers.wash, 'multiply');
+      put(layers.ink, 'source-over');
+      put(layers.fx, 'source-over');
       vctx.restore();
+      stats.area++;
     };
     let run = null;
     const play = opts => {
@@ -82,10 +117,11 @@ window.SUMI = window.SUMI || {};
         x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, c.width, c.height); x.restore();
       }
       composite();
-      run = S.replay(s => layers[S.brushes[s.tool].layer].getContext('2d'), strokes, { ...opts, onFrame: composite });
+      run = S.replay(s => layers[S.brushes[s.tool].layer].getContext('2d'), strokes,
+        { ...opts, onFrame: tl => update(tl.takeDirty()) });
       return run;
     };
-    return { layers, strokes, composite, play, get run() { return run; } };
+    return { layers, strokes, stats, composite, update, play, get run() { return run; } };
   }
 
   // the exported page's entry point (inlined as source)
@@ -96,7 +132,7 @@ window.SUMI = window.SUMI || {};
     const play = () => st.play(opts);
     view.addEventListener('click', play);
     play();
-    window.SUMI_PLAYER = { layers: st.layers, play, get run() { return st.run; } };
+    window.SUMI_PLAYER = { layers: st.layers, stats: st.stats, composite: st.composite, update: st.update, play, get run() { return st.run; } };
   }
 
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
