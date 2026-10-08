@@ -105,6 +105,12 @@ Notes for a host app:
   `beginPath()`, so finish any path you're building before you draw a stroke.
 - **Don't transpile these files.** The HTML export inlines their exact source; Babel
   helpers wouldn't come along.
+- **Redrawing only what changed.** `pen.takeDirty()` returns the box painted since the last
+  call, as `{ x0, y0, x1, y1 }` in the ctx's own coordinates (the ones you pass to
+  `segment`), or `null` if nothing was painted. During a replay, `onFrame(timeline)` runs
+  after each frame and `timeline.takeDirty()` does the same for that frame. The box is
+  conservative, so pixels never land outside it. A brush you add yourself that doesn't set
+  `reportsArea` gives an infinite box, meaning redraw everything.
 
 **▶ Replay** in the panel repaints your recorded strokes on a clean sheet, animated. Pick a
 speed (0.5×–8×) and a timing:
@@ -162,6 +168,35 @@ readback. The app's paint layers are CPU canvases for this reason.
 
 Shortcuts: `1–7` brush · `[` `]` size · `Ctrl+Z` undo (up to 15 steps or 256 MB of snapshots). Shortcuts are ignored
 while typing in the seed field. **↓ PNG** exports paper, all paint layers, grain and the stamp.
+
+## Rendering
+
+Brushes never draw on the visible canvas. Each tool paints into its own offscreen layer
+(`js/layers.js`): `wash`, `scene`, `ink`, `fx` (shards) and `mask`. Each layer is a CPU
+canvas (`willReadFrequently`) at device resolution, pre-scaled by the pixel ratio. The app's
+`requestAnimationFrame` loop composites the layers onto the board only when something changed:
+
+1. paper colour
+2. wash, with pigment granules lifted out of it, multiplied onto the paper
+3. scene, multiplied
+4. ink, then shards, drawn normally on top
+5. the red mask tint, only while the Mask tool is active
+
+Paper grain is a separate canvas overlaid with CSS, so it is never re-blended.
+
+**Area redraws.** While you paint or replay, only the box the brushes reported is redrawn.
+That box of each layer is copied into a small scratch canvas with `getImageData` /
+`putImageData`, then blended onto the board with the same operations a full redraw uses.
+Only the box is uploaded to the screen, and the result is byte-identical to a full redraw
+(tested). The granulated wash and the mask tint are cached, and are rebuilt only inside
+changed boxes. Generate, undo, Clear, resizing and switching the mask tint on or off
+still redraw the whole board.
+
+At 2× pixel density this cut a wash frame from about 68 ms to 3 ms and an ink frame from
+about 13 ms to 2 ms. Brush pixels did not change, so saved strokes replay identically.
+
+**Not yet area-based:** the standalone HTML player and the WebM recorder still redraw full
+frames.
 
 ## Files
 

@@ -144,6 +144,37 @@ no dependencies. The build wraps the sources verbatim in one function that recei
 namespace holder as `window`. Both builds pass the library tests, pixel fingerprints
 included, and `tests/run.mjs` fails when `dist/` is stale.
 
+## Area-only redraw (done 2026-10-07, branch `perf/area-redraw`)
+
+Measured first: uploading whole CPU layers to the board every frame cost ~10 ms at 1× and
+35–50 ms at 2×, more than drawing the brushes. Now only the changed box is redrawn:
+
+1. **Brushes report their painted area.** Each built-in brush declares `reportsArea: true`.
+   The guard adds a conservative box per call to `st.dirty` (the `EXTENT` table in
+   `brushes.js`). `tests/dirty.test.js` paints random strokes with every tool and fails if a
+   pixel lands outside the box.
+2. **The pen and the timeline pass the box on.** `pen.takeDirty()` and
+   `timeline.takeDirty()` return the box. Brushes without `reportsArea` give
+   `SUMI.EVERYWHERE`, meaning redraw everything.
+3. **The app redraws only that box.** `layers.markArea(box, ...layers)` copies each layer's box
+   into a small CPU scratch with get/putImageData and blends it with the same operations as
+   a full frame. Reading layers with `drawImage` was avoided because it makes Chrome
+   snapshot the layer and copy all of it on the next stroke (~3 ms at 2×). Replay frames use
+   the same path.
+4. **Area equals full.** A test checks the area redraw is byte-identical to a full redraw.
+   Three deliberately broken versions were all caught. A bug where a partial mask-tint update
+   wiped the tint outside its box was found and fixed this way.
+
+Brush pixels are unchanged: no `BRUSH_ENGINE` bump. 2× wash frame ~68 → ~3 ms, 2× ink frame
+~13 → ~2 ms, 1× painting ~8–14 → ~0.4–3 ms.
+
+Open:
+- **Spray and wash cost.** Making them cheaper to draw (fewer droplets, simpler wash
+  outlines) would change their pixels and need a `BRUSH_ENGINE` bump. On hold until the
+  user decides.
+- **Exports.** The standalone HTML player and the WebM recorder still composite full frames;
+  the same approach would apply there.
+
 ## Note
 
 The "live console" (`refreshCode`) was only a display and couldn't reproduce a stroke.
