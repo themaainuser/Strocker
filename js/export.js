@@ -212,7 +212,6 @@ window.SUMI = window.SUMI || {};
 </main>
 <script>
 window.SUMI = window.SUMI || {};
-window.SUMI.PAPER = ${jsonSafe(S.PAPER || '#f4f1ea')}; // shard chips are cut from this paper, as when recorded
 ${core}
 const PLAY = ${jsonSafe(play)};
 if (PLAY.speed === null) PLAY.speed = Infinity;

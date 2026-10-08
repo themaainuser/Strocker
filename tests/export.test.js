@@ -77,10 +77,10 @@
     T.assert(!html.includes('<!--'), 'no HTML comment opener in the page');
   });
 
-  T.test('export: player counts the strokes it plays and uses the live shard chip colour', () => {
+  T.test('export: player counts the strokes it plays; shard chips keep their recorded paper', () => {
     const { strokes } = recording(), html = SUMI.standaloneHTML(strokes, { canvas: CANVAS });
     T.assert(html.includes('5 strokes'), 'mask stroke not counted');
-    T.assert(html.includes('SUMI.PAPER = ' + JSON.stringify(SUMI.PAPER || '#f4f1ea')), 'chip colour carried over');
+    T.assert(!html.includes('SUMI.PAPER ='), 'chip colours travel with each stroke (opts.paper), not a page-wide paper');
   });
 
   T.test('export: strokes from custom brushes cannot go into a standalone HTML file', () => {

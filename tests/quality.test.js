@@ -92,6 +92,7 @@
   // pins what the fast preset paints, like the golden hashes for the defaults
   const GOLDEN_FAST = {
     2: { spray: '94a0179d', wash: '06d73067' },
+    3: { spray: '94a0179d', wash: '06d73067' }, // engine 3 added opts.paper, which spray and wash don't use
   };
   T.test('quality: golden pixel hashes for the fast preset (headless raster only)', () => {
     if (!/Headless/.test(navigator.userAgent)) T.skip('pinned to headless software raster; GPU canvases differ');

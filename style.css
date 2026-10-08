@@ -2,7 +2,7 @@
 :root{
   --bg:#0e0e10; --panel:#141416; --line:#242428;
   --txt:#ece9e2; --dim:#8b8b90; --accent:#e8e2d5;
-  --paper:#f4f1ea;
+  --paper:#f8f6f0; /* pearl white; app.js sets the chosen paper */
   --card:#1c1c1f; --amber:oklch(66.6% 0.179 58.318); /* Tailwind amber-600 */
 }
 html,body{height:100%;background:var(--bg);color:var(--txt);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
@@ -25,7 +25,10 @@ html,body{height:100%;background:var(--bg);color:var(--txt);font-family:ui-monos
 .swatches button.active{border-color:#fff}
 .row{display:flex;align-items:center;gap:10px}
 input[type=color]{width:40px;height:28px;border:none;background:none;cursor:pointer}
-#inkHex{font-size:12px;color:var(--dim)}
+#inkHex,.hex{font-size:12px;color:var(--dim)}
+/* paper swatches are pale: mark the chosen one with an accent ring, not a white border */
+.paper-swatches button{border-color:rgba(0,0,0,.25)}
+.paper-swatches button.active{border-color:var(--panel);box-shadow:0 0 0 2px var(--accent)}
 .sliders{gap:12px}
 .ctl-head{display:flex;justify-content:space-between;font-size:12px}
 .ctl-head i{color:var(--dim);font-style:normal;opacity:.7}

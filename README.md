@@ -109,8 +109,9 @@ SUMI.validateStroke(stroke);                                // throws TypeError 
 
 Notes for a host app:
 - **Errors.** `done` rejects if a brush throws during a replay, instead of staying pending.
-- **Brush engine version.** Each stroke records `SUMI.BRUSH_ENGINE` (now 2: engine 2 added
-  the spray/wash quality options, and strokes without them paint as in engine 1). If you change a
+- **Brush engine version.** Each stroke records `SUMI.BRUSH_ENGINE`. It is now 3: engine 2
+  added the spray/wash quality options, and engine 3 added `opts.paper`. Strokes without them
+  paint as in engine 1. If you change a
   brush so that it paints differently, bump that number. Old recordings still replay, but
   with the new pixels.
 - **Paths.** Brushes restore every ctx setting they touch, but they do call
@@ -186,8 +187,17 @@ readback. The app's paint layers are CPU canvases for this reason.
 | 3 | Fine line | Smoothed continuous pen for figure outlines (fast = thin). |
 | 4 | Speed lines | Drag a rubber band; on release, one long tapered hairline, snapped to the wind if within 20°. |
 | 5 | Wash | Watercolour: many faint, re-deformed polygons stacked on top of each other. Edges darken, and pigment granulates on the paper. |
-| 6 | Shard | Torn-paper chips with jagged edges, a shaded fold and a partial ink outline. |
+| 6 | Shard | Torn-paper chips with jagged edges, a shaded fold and a partial ink outline. The chips are cut from `opts.paper`, which the app sets to the current paper. |
 | 7 | Mask | Paints the silhouette (`Alt` erases). |
+
+**Paper colour.** The paper is pearl white (`#f8f6f0`) to start. Under **Paper & canvas**,
+five swatches switch it: pearl white, washi cream (`#f4f1ea`, the earlier default), rice paper,
+mist grey and kraft. A colour picker sets any other colour. The board, the PNG, exported
+recordings and new shard chips all use it.
+
+Each stroke records its paper (`opts.paper`), so shard chips drawn earlier keep the paper they
+were cut from, and replays stay exact. A stroke without `opts.paper` (recorded before it
+existed) uses `#f4f1ea`, as it did then. `layers.setPaper(color)` recolours a layer stack.
 
 Shortcuts: `1–7` brush · `[` `]` size · `Ctrl+Z` undo (up to 15 steps or 256 MB of snapshots). Shortcuts are ignored
 while typing in the seed field. **↓ PNG** exports paper, all paint layers, grain and the stamp.

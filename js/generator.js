@@ -53,7 +53,8 @@ window.SUMI = window.SUMI || {};
     return sceneInto(layers, rng, noise, mask, box, 16);
   };
 
-  S.generate = ({ layers, seed, wind = S.DEFAULT_WIND, inkEdge = true, animate = true, onLog = () => {} }) => {
+  // paper: the colour the shard chips are cut from (the brushes' default if not given)
+  S.generate = ({ layers, seed, wind = S.DEFAULT_WIND, inkEdge = true, animate = true, onLog = () => {}, paper }) => {
     const rng = S.makeRng('gen:' + seed), noise = S.makeNoise('gen:' + seed);
     const W = layers.w, H = layers.h, D = Math.hypot(W, H);
     const k = clamp(D / 1600, 0.3, 1.6); // size scale vs a ~1400×900 board
@@ -163,7 +164,7 @@ window.SUMI = window.SUMI || {};
     }
 
     function* shardStep() {
-      const count = rng.int(8, 20), o = { ...S.defaultOpts(), splatter: 25, color: INK };
+      const count = rng.int(8, 20), o = { ...S.defaultOpts(), splatter: 25, color: INK, ...(paper && { paper }) };
       for (let i = 0; i < count; i++) {
         const a = rng.range(-0.4, 0.4) * D, p = rng.gauss() * D * 0.1;
         const near = 1 - 0.5 * Math.min(1, Math.abs(p) / (D * 0.15));

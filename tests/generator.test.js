@@ -19,6 +19,12 @@ T.test('generate: painted mask confines the scene', async () => {
   T.eq(T.inkCount(px, 0, 0, 400, 49) + T.inkCount(px, 0, 251, 400, 300) + T.inkCount(px, 0, 0, 49, 300) + T.inkCount(px, 151, 0, 400, 300), 0);
   T.assert(T.inkCount(px, 50, 50, 150, 250) > 0, 'scene missing inside mask');
 });
+T.test('generate: shard chips are cut from the paper it is given', async () => {
+  const reds = L => { const px = T.pixels(L.get('fx').canvas); let n = 0; for (let i = 0; i < px.data.length; i += 4) if (px.data[i + 3] > 200 && px.data[i] > px.data[i + 1] + 80) n++; return n; };
+  const red = fresh(), plain = fresh();
+  await gen(red, 'paper', { paper: '#ff0000' }); await gen(plain, 'paper');
+  T.assert(reds(red) > 50, 'red chips: ' + reds(red)); T.eq(reds(plain), 0, 'no red without a red paper');
+});
 T.test('generate: logs every recipe step', async () => {
   const logs = []; await gen(fresh(), 'log', { onLog: m => logs.push(m) }); const all = logs.join('\n');
   for (const k of ['mist', 'scene', 'edge', 'slash', 'spray', 'shard', 'lines']) T.assert(all.includes(k), 'missing ' + k);

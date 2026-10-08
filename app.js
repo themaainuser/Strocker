@@ -16,7 +16,8 @@ const UNDO_BYTES = 256 * 1024 * 1024; // undo snapshots are full-size canvases: 
 const newSeed = () => Math.random().toString(36).slice(2, 8);
 
 // spray/wash quality starts at Balanced: close to Full at about half the drawing time
-const S = { ...SUMI.defaultOpts(), ...SUMI.QUALITY.balanced, tool: 'dry', wind: -35, seed: newSeed(), grain: 60, paper: true };
+// paper: grain overlay on/off; paperColor: the colour under everything (pearl white to start)
+const S = { ...SUMI.defaultOpts(), ...SUMI.QUALITY.balanced, tool: 'dry', wind: -35, seed: newSeed(), grain: 60, paper: true, paperColor: SUMI.PAPER };
 const QUALITY_KEYS = Object.keys(SUMI.QUALITY.full);
 
 let layers = null;
@@ -34,6 +35,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const windRad = () => S.wind * Math.PI / 180;
 const strokeOpts = () => ({
   size: S.size, opacity: S.opacity, dryness: S.dryness, splatter: S.splatter, bleed: S.bleed, taper: S.taper, color: S.color,
+  paper: S.paperColor, // shard chips are cut from it
   ...Object.fromEntries(QUALITY_KEYS.map(k => [k, S[k]])),
 });
 
@@ -306,7 +308,7 @@ function generate({ animate = true } = {}) {
   $('seedInput').value = S.seed;
   log('generate', `seed "${S.seed}" · wind ${S.wind}°`);
   const r = SUMI.generate({
-    layers, seed: S.seed, wind: windRad(), inkEdge: $('chkInkEdge').checked, animate,
+    layers, seed: S.seed, wind: windRad(), inkEdge: $('chkInkEdge').checked, animate, paper: S.paperColor,
     onLog: m => log(m.split('(')[0], m.slice(m.indexOf('(') + 1, -1)),
   });
   return startRun(r, 'generate', () => toastMsg('poster ready — seed ' + S.seed));
@@ -379,6 +381,24 @@ document.querySelectorAll('#swatches button').forEach(b => b.onclick = () => {
   $('inkColor').value = S.color; $('inkHex').textContent = S.color;
 });
 $('inkColor').oninput = e => { S.color = e.target.value; $('inkHex').textContent = S.color; };
+
+// paper colour: the board, PNG and exports use it, and new shard strokes cut their chips from it
+// (strokes record it, so earlier strokes keep the paper they were cut from)
+function setPaper(color) {
+  S.paperColor = color.toLowerCase();
+  if (layers) layers.setPaper(S.paperColor);
+  document.documentElement.style.setProperty('--paper', S.paperColor); // the board before its first frame
+  let name = 'custom';
+  document.querySelectorAll('#paperSwatches button').forEach(b => {
+    const on = b.dataset.paper === S.paperColor;
+    b.classList.toggle('active', on); b.setAttribute('aria-pressed', on);
+    if (on) name = b.title;
+  });
+  $('paperColor').value = S.paperColor;
+  $('paperHex').textContent = `${S.paperColor} · ${name}`;
+}
+document.querySelectorAll('#paperSwatches button').forEach(b => b.onclick = () => setPaper(b.dataset.paper));
+$('paperColor').oninput = e => setPaper(e.target.value);
 
 $('s-size').oninput = e => { S.size = +e.target.value; updateLabels(); };
 $('s-opacity').oninput = e => { S.opacity = +e.target.value / 100; updateLabels(); };
@@ -528,14 +548,14 @@ function exportCanvas() {
   };
 }
 const exportPlayback = () => ({ speed: +$('replaySpeed').value, ...playbackShape($('replayTiming').value) });
-function exportJSON() { return SUMI.recordingJSON(strokes, { canvas: exportCanvas() }); }
+function exportJSON() { return SUMI.recordingJSON(strokes, { canvas: exportCanvas(), paper: S.paperColor }); }
 // a Promise: the page carries the recording gzip-compressed and unpacks it on open
 function exportHTML() {
-  return SUMI.standaloneHTMLGzip(strokes, { canvas: exportCanvas(), title: 'SUMI strokes · ' + S.seed, ...exportPlayback() });
+  return SUMI.standaloneHTMLGzip(strokes, { canvas: exportCanvas(), paper: S.paperColor, title: 'SUMI strokes · ' + S.seed, ...exportPlayback() });
 }
 function exportWebM(extra = {}) {
   if (!strokes.length || videoJob || !canMakeVideo()) return null;
-  const opts = { canvas: exportCanvas(), ...exportPlayback(), ...extra }, recs = strokes.slice();
+  const opts = { canvas: exportCanvas(), paper: S.paperColor, ...exportPlayback(), ...extra }, recs = strokes.slice();
   const record = () => watchVideo(SUMI.recordWebM(recs, opts), false);
   try {
     if (!SUMI.canRenderWebM()) return record();
@@ -568,7 +588,7 @@ function watchVideo(job, rendered, fallback) {
 const sizeLabel = bytes => (bytes / 1024).toFixed(1) + ' KB';
 $('btnExportJSON').onclick = async () => {
   try {
-    const blob = await SUMI.recordingGzip(strokes, { canvas: exportCanvas() }); // read back with SUMI.readRecording
+    const blob = await SUMI.recordingGzip(strokes, { canvas: exportCanvas(), paper: S.paperColor }); // read back with SUMI.readRecording
     download(blob, fileName('json.gz'));
     log('export', `JSON · ${strokes.length} strokes · ${sizeLabel(blob.size)} gzipped`);
   } catch (err) { toastMsg('export failed: ' + err.message); }
@@ -617,13 +637,13 @@ let frames = 0, lastF = performance.now();
 
 addEventListener('resize', resize);
 $('seedInput').value = S.seed;
-updateLabels(); resize(); refreshButtons();
+updateLabels(); setPaper(S.paperColor); resize(); refreshButtons();
 
 SUMI.app = {
   S,
   get layers() { return layers; },
   get busy() { return busy; },
-  setTool, setQuality, generate, replay, cancel: cancelRun, undo, fillMask, clearMask, renderNow,
+  setTool, setQuality, setPaper, generate, replay, cancel: cancelRun, undo, fillMask, clearMask, renderNow,
   measureCost, showCost, COST,
   exportJSON, exportHTML, exportWebM,
   undoDepth: () => undoStack.length,

@@ -1,6 +1,6 @@
 /*! SUMI brushes — drop-in build (classic script: global SUMI)
  * Ink brushes (dry, spray, fine, lines, wash, shard, mask) + stroke recorder + replay.
- * Brush engine 2 · stroke format 3 · sources 087101d54c65
+ * Brush engine 3 · stroke format 3 · sources fc613325a9d8
  * Built by tools/build-dist.mjs from js/rng.js, js/brushes.js, js/recorder.js, js/playback.js — edit those, not this file.
  * For pixel-identical replay, record and replay on canvases created with
  * getContext('2d', { willReadFrequently: true }). Docs: README.md "Drop-in file".
@@ -91,8 +91,10 @@ window.SUMI = window.SUMI || {};
   S.DEFAULT_WIND = -35 * Math.PI / 180; // lower-left → upper-right, like the reference slashes
   // Version of what these brushes paint. Recordings store it; bump it whenever a change alters
   // the pixels of an existing stroke, or adds options an older engine would ignore (the
-  // golden-hash tests are keyed by it). 2 added the spray/wash quality options below.
-  S.BRUSH_ENGINE = 2;
+  // golden-hash tests are keyed by it). 2 added the spray/wash quality options below; 3 added
+  // opts.paper, the colour shard chips are cut from (before, a page-wide SUMI.PAPER).
+  S.BRUSH_ENGINE = 3;
+  const ORIGINAL_PAPER = '#f4f1ea'; // the paper every stroke recorded before opts.paper was cut from
   const DAB_CANCEL_PX = 2; // dry brush: travel that turns a click into a drag
 
   // Quality of the two costliest brushes, traded for drawing time. Recorded per stroke like any
@@ -108,7 +110,10 @@ window.SUMI = window.SUMI || {};
     fast: Object.freeze({ sprayDensity: 0.5, sprayGap: 6, washLayers: 3, washDetail: 3, washEdge: 0 }),
   });
 
-  S.defaultOpts = () => ({ size: 34, opacity: 0.85, dryness: 0.55, splatter: 40, bleed: 35, taper: 0.65, color: '#111318', ...S.QUALITY.full });
+  S.defaultOpts = () => ({
+    size: 34, opacity: 0.85, dryness: 0.55, splatter: 40, bleed: 35, taper: 0.65, color: '#111318', paper: ORIGINAL_PAPER,
+    ...S.QUALITY.full,
+  });
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const TAU = Math.PI * 2;
@@ -169,13 +174,13 @@ window.SUMI = window.SUMI || {};
   S.normalizeOpts = o => {
     o = o || {};
     const d = S.defaultOpts();
-    const color = o.color == null ? d.color : o.color;
-    ink.parseColor(color); // throws TypeError on anything that isn't a colour
+    const color = o.color == null ? d.color : o.color, paper = o.paper == null ? d.paper : o.paper;
+    ink.parseColor(color); ink.parseColor(paper); // throw TypeError on anything that isn't a colour
     return {
       size: num(o.size, d.size, 1, 1000), opacity: num(o.opacity, d.opacity, 0, 1),
       dryness: num(o.dryness, d.dryness, 0, 1), splatter: num(o.splatter, d.splatter, 0, 100),
       bleed: num(o.bleed, d.bleed, 0, 100), taper: num(o.taper, d.taper, 0, 1),
-      color: color.trim(),
+      color: color.trim(), paper: paper.trim(),
       sprayDensity: num(o.sprayDensity, d.sprayDensity, 0.1, 1), sprayGap: num(o.sprayGap, d.sprayGap, 0, 50),
       washLayers: Math.round(num(o.washLayers, d.washLayers, 1, 6)), washDetail: Math.round(num(o.washDetail, d.washDetail, 2, 5)),
       washEdge: num(o.washEdge, d.washEdge, 0, 1),
@@ -400,7 +405,7 @@ window.SUMI = window.SUMI || {};
 
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.12)'; ctx.shadowBlur = 3; ctx.shadowOffsetY = 1;
-    ctx.fillStyle = S.PAPER || '#f4f1ea';
+    ctx.fillStyle = opts.paper || ORIGINAL_PAPER; // chips are cut from the stroke's own paper
     ctx.fill(path);
     ctx.fillStyle = 'rgba(150,160,170,0.16)';
     ctx.fill(path);

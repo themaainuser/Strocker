@@ -110,6 +110,17 @@
 
     <div class="section">
       <label class="section-title">Paper & canvas</label>
+      <div class="swatches paper-swatches" id="paperSwatches" role="group" aria-label="Paper colour">
+        <button data-paper="#f8f6f0" class="active" aria-pressed="true" style="--c:#f8f6f0" title="pearl white"></button>
+        <button data-paper="#f4f1ea" aria-pressed="false" style="--c:#f4f1ea" title="washi cream"></button>
+        <button data-paper="#efe9dc" aria-pressed="false" style="--c:#efe9dc" title="rice paper"></button>
+        <button data-paper="#eceeef" aria-pressed="false" style="--c:#eceeef" title="mist grey"></button>
+        <button data-paper="#e5d8c0" aria-pressed="false" style="--c:#e5d8c0" title="kraft"></button>
+      </div>
+      <div class="row">
+        <input type="color" id="paperColor" value="#f8f6f0" aria-label="Custom paper colour" />
+        <span id="paperHex" class="hex">#f8f6f0 · pearl white</span>
+      </div>
       <div class="row btn-row">
         <button id="btnPaper" class="ghost on">Paper grain: on</button>
         <button id="btnUndo" class="ghost">↩ Undo</button>

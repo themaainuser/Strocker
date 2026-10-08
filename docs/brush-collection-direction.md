@@ -14,8 +14,8 @@ for the strokes.
 `js/rng.js` + `js/brushes.js`: dry brush, spray, fine line, speed lines, wash, shard, mask.
 
 - `brushes.js` depends only on `rng.js`. `tests/standalone.html` checks this by loading
-  just those two files. One soft exception remains: `ink.shard` reads `SUMI.PAPER` for the
-  chip colour, with a hard-coded `#f4f1ea` fallback.
+  just those two files. (The one soft exception, `ink.shard` reading a page-wide paper colour,
+  is gone: chips are cut from `opts.paper` since brush engine 3.)
 - `scene.js`, `generator.js`, `contour.js` and `layers.js` are poster-specific and optional.
 
 ## The brush contract (in place since the fix pass)
@@ -251,7 +251,9 @@ actually stored.
 
 - Use `globalThis` instead of `window`, for Workers / OffscreenCanvas. (Done for the drop-in
   files: the build passes `globalThis` in as `window`. The separate `js/` files still use `window`.)
-- Pass the paper colour as `opts.paper` instead of reading `SUMI.PAPER`.
+- ~~Pass the paper colour as `opts.paper` instead of reading the page-wide paper.~~ Done
+  2026-10-08 (brush engine 3), with the app's paper colour options; the default paper is pearl
+  white (`#f8f6f0`).
 - `stamp()` can place a stamp behind the segment start when the spacing shrinks.
 - The shard's tint fill still runs under its drop shadow.
 - Calling `segment` before `start` throws for some brushes.

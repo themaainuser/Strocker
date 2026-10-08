@@ -2,7 +2,7 @@
 // into the visible board. Paper is a flat fill; grain stays a DOM overlay.
 window.SUMI = window.SUMI || {};
 (function (S) {
-  S.PAPER = '#f4f1ea';
+  S.PAPER = '#f8f6f0'; // pearl white: a new layer stack's paper (L.setPaper changes it)
   S.LAYER_NAMES = ['wash', 'scene', 'ink', 'fx'];
   const ALL = [...S.LAYER_NAMES, 'mask'];
   const MASK_TINT = 'rgba(220,40,40,0.35)';
@@ -44,7 +44,7 @@ window.SUMI = window.SUMI || {};
   }
 
   S.createLayers = function (w, h, dpr = 1) {
-    const L = { w, h, dpr, dirty: true, stats: { granulations: 0, tints: 0, fullFrames: 0, areaFrames: 0 } };
+    const L = { w, h, dpr, paper: S.PAPER, dirty: true, stats: { granulations: 0, tints: 0, fullFrames: 0, areaFrames: 0 } };
     const layers = {};
     const version = {}; // per-layer change counters (L.version), e.g. to cache "is the mask empty"
     // What changed since the last composite. A full redraw re-blends every layer and uploads
@@ -82,6 +82,13 @@ window.SUMI = window.SUMI || {};
     };
 
     L.get = name => layers[name];
+    // the paper colour under every layer; the next composite redraws the whole board
+    L.setPaper = color => {
+      if (color === L.paper) return;
+      L.paper = color;
+      frameFull = true;
+      L.dirty = true;
+    };
     L.version = name => version[name];
     // markDirty('ink') after drawing on one layer; markDirty() when unsure (all layers changed)
     L.markDirty = (...names) => changed(names.length ? names : ALL);
@@ -212,7 +219,7 @@ window.SUMI = window.SUMI || {};
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = S.PAPER;
+      ctx.fillStyle = L.paper;
       ctx.fillRect(0, 0, W, H);
       ctx.globalCompositeOperation = 'multiply';
       ctx.drawImage(wash, 0, 0, W, H);
@@ -240,7 +247,7 @@ window.SUMI = window.SUMI || {};
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = S.PAPER;
+      ctx.fillStyle = L.paper;
       ctx.fillRect(r.x, r.y, r.w, r.h);
       put(wash, 'multiply');
       put(layers.scene.canvas, 'multiply');
