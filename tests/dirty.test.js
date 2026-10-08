@@ -18,7 +18,9 @@
     for (const tool of FIX.TOOLS) {
       for (let k = 0; k < 6; k++) {
         const c = T.canvas(400, 400), size = rng.range(2, 140);
-        const opts = { size, splatter: rng.range(0, 100), bleed: rng.range(0, 100), dryness: rng.range(0, 1), opacity: 1, color: '#000' };
+        const opts = { size, splatter: rng.range(0, 100), bleed: rng.range(0, 100), dryness: rng.range(0, 1), opacity: 1, color: '#000',
+          sprayDensity: rng.range(0.1, 1), sprayGap: rng.chance(0.5) ? 0 : rng.range(0, 12),
+          washLayers: rng.int(1, 6), washDetail: rng.int(2, 5), washEdge: rng.next() };
         const st = SUMI.makeStroke(c.ctx, 'a' + k, opts, rng.range(-3, 3)), b = SUMI.brushes[tool], rects = [];
         let p = { x: rng.range(120, 280), y: rng.range(120, 280) };
         b.start(st, p); rects.push(take(st));

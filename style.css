@@ -48,6 +48,15 @@ button.ghost.wide{width:100%;flex:none;padding:9px 12px}
 button:disabled{opacity:.4;cursor:not-allowed}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #cursor.mask{border-style:dashed;border-color:#c33}
+.quality>summary{cursor:pointer;margin-bottom:10px;overflow:hidden} /* holds the floated meter */
+.quality>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.section-title .meter{color:var(--dim);font-variant-numeric:tabular-nums;letter-spacing:.04em;text-transform:none}
+.section-title .meter.light{color:#6f6}
+.section-title .meter.moderate{color:#e0b84a}
+.section-title .meter.heavy{color:#ff9a9a}
+.quality-name{font-size:11px;color:var(--dim)}
+.quality-name b{color:var(--accent);font-weight:400}
+.cost-warn{font-size:11px;line-height:1.5;color:#ffc2b4;background:rgba(255,110,80,.08);border-left:2px solid #ff9a9a;padding:6px 8px;border-radius:0 6px 6px 0}
 .rec-head{display:flex;justify-content:space-between;font-size:12px}
 .rec-head span{color:var(--dim)}
 .console pre{background:#0a0a0c;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;line-height:1.5;color:#b8f0b8;white-space:pre-wrap;min-height:86px}

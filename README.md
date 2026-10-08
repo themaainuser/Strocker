@@ -98,7 +98,8 @@ SUMI.validateStroke(stroke);                                // throws TypeError 
 
 Notes for a host app:
 - **Errors.** `done` rejects if a brush throws during a replay, instead of staying pending.
-- **Brush engine version.** Each stroke records `SUMI.BRUSH_ENGINE`. If you change a
+- **Brush engine version.** Each stroke records `SUMI.BRUSH_ENGINE` (now 2: engine 2 added
+  the spray/wash quality options, and strokes without them paint as in engine 1). If you change a
   brush so that it paints differently, bump that number. Old recordings still replay, but
   with the new pixels.
 - **Paths.** Brushes restore every ctx setting they touch, but they do call
@@ -168,6 +169,37 @@ readback. The app's paint layers are CPU canvases for this reason.
 
 Shortcuts: `1–7` brush · `[` `]` size · `Ctrl+Z` undo (up to 15 steps or 256 MB of snapshots). Shortcuts are ignored
 while typing in the seed field. **↓ PNG** exports paper, all paint layers, grain and the stamp.
+
+### Quality: spray and wash
+
+Spray and wash take the most time to draw, so five options trade some of their look for
+speed. They are brush options like size, recorded with each stroke, so a replay always uses
+the same settings. A stroke that doesn't set them paints at full quality. That includes every
+recording made before these options existed, so those still replay exactly.
+
+| Option | Range (default) | What it does | Look when lowered |
+|---|---|---|---|
+| `sprayDensity` | 0.1–1 (1) | share of droplets and mist per burst | sparser spray |
+| `sprayGap` | 0–50 px (0) | travel between bursts; 0 is a burst per segment | clumpier along the stroke |
+| `washLayers` | 1–6 (6) | glaze layers per stamp, each darker when there are fewer | less depth |
+| `washDetail` | 2–5 (5) | outline points per layer, at most 10·2ⁿ (5 = 320) | smoother edges |
+| `washEdge` | 0–1 (1) | share of layers that get the darker edge line, the main wash cost | lighter rim |
+
+`SUMI.QUALITY` holds three presets: `full` (the defaults), `balanced` and `fast`. Use one in
+another project with `opts: { size: 40, ...SUMI.QUALITY.balanced }`.
+
+Measured per 12 px of painting at size 34 on a desktop PC, at 1× pixel density:
+
+| ms per move | Full | Balanced | Fast |
+|---|---|---|---|
+| Spray | ~2.3 | ~1.8 | ~0.8 |
+| Wash | ~1.2 | ~0.5 | ~0.2 |
+
+**In the app**, the **Quality** panel has the presets and a slider for each option. It
+starts on Balanced; once a slider moves off a preset, it reads "custom". The meter in the
+panel's heading shows the current brush's drawing time, measured on your device whenever a
+setting changes: green under 4 ms per move, amber under 8 ms, red from 8 ms. At red, a
+warning names the settings to lower, because painting may stutter.
 
 ## Rendering
 

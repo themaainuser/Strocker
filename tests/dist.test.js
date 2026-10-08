@@ -19,7 +19,7 @@
     T.eq(esm.leakedGlobal, false, 'importing created a global SUMI');
     T.eq(esm.named.default, esm.SUMI);
     for (const k of ['recordStroke', 'replay', 'replayStroke', 'playback', 'validateStroke', 'makeStroke', 'normalizeOpts',
-      'defaultOpts', 'makeRng', 'makeNoise', 'hashSeed', 'brushes', 'ink', 'BRUSH_ENGINE', 'BRUSH_NAMES', 'STROKE_FORMAT', 'DEFAULT_WIND']) {
+      'defaultOpts', 'makeRng', 'makeNoise', 'hashSeed', 'brushes', 'ink', 'BRUSH_ENGINE', 'BRUSH_NAMES', 'QUALITY', 'STROKE_FORMAT', 'DEFAULT_WIND']) {
       T.eq(esm.named[k], esm.SUMI[k], k);
     }
   });

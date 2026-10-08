@@ -142,8 +142,10 @@
 
   // keyed by SUMI.BRUSH_ENGINE: a change that alters these hashes must bump the engine version
   // (and add its hashes here), so recordings say which brushes painted them
+  const ENGINE_1 = { dry: 'cffaf707', spray: '96fc84e8', fine: '74f81a52', lines: '5c866284', wash: '637dd7f8', shard: '81f0cd31', mask: '3b72f452' };
   const GOLDEN = {
-    1: { dry: 'cffaf707', spray: '96fc84e8', fine: '74f81a52', lines: '5c866284', wash: '637dd7f8', shard: '81f0cd31', mask: '3b72f452' },
+    1: ENGINE_1,
+    2: ENGINE_1, // engine 2 only added the spray/wash quality options: default strokes paint as in 1
   };
   T.test('brushes: golden pixel hashes for this BRUSH_ENGINE (headless raster only)', () => {
     if (!/Headless/.test(navigator.userAgent)) T.skip('pinned to headless software raster; GPU canvases differ');

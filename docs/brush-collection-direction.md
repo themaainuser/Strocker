@@ -169,11 +169,30 @@ Brush pixels are unchanged: no `BRUSH_ENGINE` bump. 2× wash frame ~68 → ~3 ms
 ~13 → ~2 ms, 1× painting ~8–14 → ~0.4–3 ms.
 
 Open:
-- **Spray and wash cost.** Making them cheaper to draw (fewer droplets, simpler wash
-  outlines) would change their pixels and need a `BRUSH_ENGINE` bump. On hold until the
-  user decides.
 - **Exports.** The standalone HTML player and the WebM recorder still composite full frames;
   the same approach would apply there.
+
+## Spray and wash quality options (done 2026-10-08, branch `feat/quality-controls`)
+
+The user wanted the cheaper spray and wash adjustable, with toggles or sliders and a warning
+in the slow range, instead of fixed. So they are five brush options, recorded per stroke:
+`sprayDensity`, `sprayGap`, `washLayers`, `washDetail` and `washEdge` (see the README). With
+none set, a stroke paints at full quality, so engine-1 recordings replay exactly. The old
+golden hashes pass unchanged. `BRUSH_ENGINE` went to 2 anyway, because an engine-1
+replayer would ignore the new options.
+
+Measured before building, with a pixel read after each move. Without it, Chrome defers the
+raster and the timings mostly miss it:
+- **Fewer droplets** and **bursts further apart** each about halve spray's cost.
+- **Wash's edge line is its main cost.** Dropping it saves 65–75%. Fewer layers save
+  35–50%, and fewer outline points save up to 60% at large sizes. Fading the line without
+  dropping it saves nothing, so `washEdge` sets how many layers are outlined.
+- **Pre-drawn images were dropped.** Droplet sprites were 3–4× slower than the batched
+  path fills, and halo sprites saved nothing.
+
+`SUMI.QUALITY` has `full`, `balanced` and `fast` presets. They were tuned by eye against Full.
+The app starts on Balanced. Its brush cost meter times the current brush on a scratch canvas at
+the board's pixel density, and warns at ≥ 8 ms per 12 px move.
 
 ## Note
 

@@ -15,7 +15,9 @@ const UNDO_LIMIT = 15;
 const UNDO_BYTES = 256 * 1024 * 1024; // undo snapshots are full-size canvases: cap their memory too
 const newSeed = () => Math.random().toString(36).slice(2, 8);
 
-const S = { ...SUMI.defaultOpts(), tool: 'dry', wind: -35, seed: newSeed(), grain: 60, paper: true };
+// spray/wash quality starts at Balanced: close to Full at about half the drawing time
+const S = { ...SUMI.defaultOpts(), ...SUMI.QUALITY.balanced, tool: 'dry', wind: -35, seed: newSeed(), grain: 60, paper: true };
+const QUALITY_KEYS = Object.keys(SUMI.QUALITY.full);
 
 let layers = null;
 let drawing = false, activeId = null, pen = null, last = null, lastW = 0, lastT = 0, smoothV = 0;
@@ -30,7 +32,10 @@ let run = null, busy = false; // run.kind is 'generate' or 'replay'
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const windRad = () => S.wind * Math.PI / 180;
-const strokeOpts = () => ({ size: S.size, opacity: S.opacity, dryness: S.dryness, splatter: S.splatter, bleed: S.bleed, taper: S.taper, color: S.color });
+const strokeOpts = () => ({
+  size: S.size, opacity: S.opacity, dryness: S.dryness, splatter: S.splatter, bleed: S.bleed, taper: S.taper, color: S.color,
+  ...Object.fromEntries(QUALITY_KEYS.map(k => [k, S[k]])),
+});
 
 // ---------- feedback ----------
 function toastMsg(m) {
@@ -83,6 +88,7 @@ function resize() {
   else layers = SUMI.createLayers(w, h, dpr);
   layers.markDirty();
   renderGrain();
+  scheduleCost(); // the cost depends on the pixel density
 }
 
 // paper tooth on its own overlay: mottling + speckles + fibres (seeded, so it never flickers)
@@ -365,6 +371,7 @@ function setTool(name) {
   document.querySelectorAll('#brushGrid button').forEach(b => b.classList.toggle('active', b.dataset.brush === name));
   cursor.classList.toggle('mask', name === 'mask');
   if (layers) layers.dirty = true; // recomposite: the mask tint follows the tool
+  scheduleCost();
 }
 document.querySelectorAll('#brushGrid button').forEach(b => b.onclick = () => {
   setTool(b.dataset.brush);
@@ -394,6 +401,88 @@ function updateLabels() {
   $('v-taper').textContent = S.taper.toFixed(2);
   $('v-grain').textContent = S.grain;
   $('v-wind').textContent = S.wind + '°';
+  for (const k of QUALITY_KEYS) $('v-' + k).textContent = QUALITY_UI[k].label(S[k]);
+  const preset = Object.keys(SUMI.QUALITY).find(name => QUALITY_KEYS.every(k => SUMI.QUALITY[name][k] === S[k]));
+  document.querySelectorAll('#qualityPresets button').forEach(b => b.classList.toggle('on', b.dataset.preset === preset));
+  $('qualityName').textContent = preset || 'custom';
+  scheduleCost();
+}
+
+// ---------- spray & wash quality ----------
+// slider value <-> option value, and how each option reads in its label
+const QUALITY_UI = {
+  sprayDensity: { opt: v => v / 100, slider: o => Math.round(o * 100), label: o => Math.round(o * 100) + '%' },
+  sprayGap: { opt: v => v, slider: o => o, label: o => (o ? o + ' px' : 'every step') },
+  washLayers: { opt: v => v, slider: o => o, label: o => String(o) },
+  washDetail: { opt: v => v, slider: o => o, label: o => 'max ' + 10 * 2 ** o },
+  washEdge: { opt: v => v / 100, slider: o => Math.round(o * 100), label: o => Math.round(S.washLayers * o) + ' of ' + S.washLayers },
+};
+for (const k of QUALITY_KEYS) {
+  $('s-' + k).oninput = e => { S[k] = QUALITY_UI[k].opt(+e.target.value); updateLabels(); };
+}
+function setQuality(name) {
+  const Q = SUMI.QUALITY[name];
+  if (!Q) return;
+  for (const k of QUALITY_KEYS) { S[k] = Q[k]; $('s-' + k).value = QUALITY_UI[k].slider(Q[k]); }
+  updateLabels();
+}
+document.querySelectorAll('#qualityPresets button').forEach(b => b.onclick = () => setQuality(b.dataset.preset));
+
+// Brush cost meter: times the current brush and settings on a scratch canvas at the board's pixel
+// density, per 12 px of painting (about one pointer move), so the warning reflects this device.
+const COST = { light: 4, heavy: 8 }; // ms; a 60 fps frame is 16.7 ms and the board needs some of it
+let costTimer = 0, lastCostLevel = 'light';
+function scheduleCost() {
+  clearTimeout(costTimer);
+  costTimer = setTimeout(() => (drawing || busy ? scheduleCost() : measureCost()), 300);
+}
+function brushCost(tool, opts, dpr) {
+  const w = 360, h = 160, c = document.createElement('canvas');
+  c.width = w * dpr; c.height = h * dpr;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const st = SUMI.makeStroke(x, 'cost', opts, windRad()), b = SUMI.brushes[tool];
+  let p = { x: 20, y: h / 2 };
+  b.start(st, p);
+  const move = () => { // four 3 px steps, like strokeTo, then a read like the area redraw's
+    for (let i = 0; i < 4; i++) {
+      const q = { x: p.x + 3, y: h / 2 + Math.sin(p.x / 30) * 10 };
+      st.speed = 0.2; b.segment(st, p, q, opts.size, Math.atan2(q.y - p.y, q.x - p.x)); p = q;
+    }
+    x.getImageData(0, 0, 1, 1);
+  };
+  for (let i = 0; i < 3; i++) move(); // warm-up
+  const rounds = [];
+  for (let r = 0; r < 3; r++) {
+    const t0 = performance.now();
+    for (let i = 0; i < 6; i++) move();
+    rounds.push((performance.now() - t0) / 6);
+  }
+  return rounds.sort((a, b) => a - b)[1]; // median
+}
+const costLevel = ms => (ms >= COST.heavy ? 'heavy' : ms >= COST.light ? 'moderate' : 'light');
+const COST_ADVICE = {
+  spray: 'Lower spray density, raise spray spacing, pick a smaller size, or choose Balanced or Fast.',
+  wash: 'Use fewer wash layers or edge lines, less edge detail, a smaller size, or Balanced or Fast.',
+};
+function showCost(ms, tool = S.tool) {
+  const level = costLevel(ms), meter = $('costMeter'), warn = $('costWarn');
+  meter.className = 'meter ' + level;
+  meter.textContent = `${tool} · ${ms.toFixed(1)} ms`;
+  warn.hidden = level !== 'heavy';
+  warn.textContent = level === 'heavy'
+    ? `⚠ Heavy: ${tool} takes about ${ms.toFixed(1)} ms per move on this device, so painting may stutter. ` +
+      (COST_ADVICE[tool] || 'Pick a smaller size or less splatter.')
+    : '';
+  if (level === 'heavy' && lastCostLevel !== 'heavy') toastMsg('⚠ heavy brush settings: painting may stutter');
+  lastCostLevel = level;
+  return { ms, level, tool };
+}
+// measures now (the meter calls this after settings settle); resolves to { ms, level, tool }
+function measureCost() {
+  clearTimeout(costTimer);
+  const tool = S.tool;
+  return Promise.resolve(showCost(brushCost(tool, strokeOpts(), layers ? layers.dpr : 1), tool));
 }
 
 $('btnGenerate').onclick = () => {
@@ -517,7 +606,8 @@ SUMI.app = {
   S,
   get layers() { return layers; },
   get busy() { return busy; },
-  setTool, generate, replay, cancel: cancelRun, undo, fillMask, clearMask, renderNow,
+  setTool, setQuality, generate, replay, cancel: cancelRun, undo, fillMask, clearMask, renderNow,
+  measureCost, showCost, COST,
   exportJSON, exportHTML, exportWebM,
   undoDepth: () => undoStack.length,
   undoBytes,

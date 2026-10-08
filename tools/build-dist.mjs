@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SOURCES = ['js/rng.js', 'js/brushes.js', 'js/recorder.js', 'js/playback.js'];
 export const OUTPUTS = { classic: 'dist/sumi-brushes.js', module: 'dist/sumi-brushes.mjs' };
-const EXPORTS = ['hashSeed', 'makeRng', 'makeNoise', 'DEFAULT_WIND', 'BRUSH_ENGINE', 'BRUSH_NAMES', 'defaultOpts',
+const EXPORTS = ['hashSeed', 'makeRng', 'makeNoise', 'DEFAULT_WIND', 'BRUSH_ENGINE', 'BRUSH_NAMES', 'QUALITY', 'defaultOpts',
   'normalizeOpts', 'makeStroke', 'ink', 'brushes', 'STROKE_FORMAT', 'validateStroke', 'recordStroke',
   'playback', 'replayStroke', 'replay'];
 

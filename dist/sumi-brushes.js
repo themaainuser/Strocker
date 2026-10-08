@@ -1,6 +1,6 @@
 /*! SUMI brushes — drop-in build (classic script: global SUMI)
  * Ink brushes (dry, spray, fine, lines, wash, shard, mask) + stroke recorder + replay.
- * Brush engine 1 · stroke format 2 · sources 9aff02f6a6d1
+ * Brush engine 2 · stroke format 2 · sources 274355706aee
  * Built by tools/build-dist.mjs from js/rng.js, js/brushes.js, js/recorder.js, js/playback.js — edit those, not this file.
  * For pixel-identical replay, record and replay on canvases created with
  * getContext('2d', { willReadFrequently: true }). Docs: README.md "Drop-in file".
@@ -90,11 +90,25 @@ window.SUMI = window.SUMI || {};
 (function sumiBrushes(S) {
   S.DEFAULT_WIND = -35 * Math.PI / 180; // lower-left → upper-right, like the reference slashes
   // Version of what these brushes paint. Recordings store it; bump it whenever a change alters
-  // the pixels of an existing stroke (the golden-hash tests are keyed by it).
-  S.BRUSH_ENGINE = 1;
+  // the pixels of an existing stroke, or adds options an older engine would ignore (the
+  // golden-hash tests are keyed by it). 2 added the spray/wash quality options below.
+  S.BRUSH_ENGINE = 2;
   const DAB_CANCEL_PX = 2; // dry brush: travel that turns a click into a drag
 
-  S.defaultOpts = () => ({ size: 34, opacity: 0.85, dryness: 0.55, splatter: 40, bleed: 35, taper: 0.65, color: '#111318' });
+  // Quality of the two costliest brushes, traded for drawing time. Recorded per stroke like any
+  // other option; a stroke without them (any engine-1 recording) paints at full quality.
+  //   sprayDensity  0.1..1   share of droplets and mist each spray burst throws
+  //   sprayGap      0..50 px travel between spray bursts (0: a burst on every segment)
+  //   washLayers    1..6     glaze layers per wash stamp; fewer are each darker, so depth holds
+  //   washDetail    2..5     outline detail: at most 10·2^n points per layer (5 = 320)
+  //   washEdge      0..1     share of wash layers that get the darker edge line (the main cost)
+  S.QUALITY = Object.freeze({
+    full: Object.freeze({ sprayDensity: 1, sprayGap: 0, washLayers: 6, washDetail: 5, washEdge: 1 }),
+    balanced: Object.freeze({ sprayDensity: 0.8, sprayGap: 4, washLayers: 4, washDetail: 4, washEdge: 0.5 }),
+    fast: Object.freeze({ sprayDensity: 0.5, sprayGap: 6, washLayers: 3, washDetail: 3, washEdge: 0 }),
+  });
+
+  S.defaultOpts = () => ({ size: 34, opacity: 0.85, dryness: 0.55, splatter: 40, bleed: 35, taper: 0.65, color: '#111318', ...S.QUALITY.full });
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const TAU = Math.PI * 2;
@@ -162,6 +176,9 @@ window.SUMI = window.SUMI || {};
       dryness: num(o.dryness, d.dryness, 0, 1), splatter: num(o.splatter, d.splatter, 0, 100),
       bleed: num(o.bleed, d.bleed, 0, 100), taper: num(o.taper, d.taper, 0, 1),
       color: color.trim(),
+      sprayDensity: num(o.sprayDensity, d.sprayDensity, 0.1, 1), sprayGap: num(o.sprayGap, d.sprayGap, 0, 50),
+      washLayers: Math.round(num(o.washLayers, d.washLayers, 1, 6)), washDetail: Math.round(num(o.washDetail, d.washDetail, 2, 5)),
+      washEdge: num(o.washEdge, d.washEdge, 0, 1),
     };
   };
 
@@ -192,7 +209,8 @@ window.SUMI = window.SUMI || {};
 
   // ---------- spray: droplets thrown along `dir` ----------
   const BUCKETS = 4; // droplets are batched into a few alpha bands: one fill per band
-  function sprayRaw(ctx, rng, x, y, dir, radius, amount, opts) {
+  // `density` (0..1) thins droplets and mist: the spray brush's quality option, 1 elsewhere
+  function sprayRaw(ctx, rng, x, y, dir, radius, amount, opts, density = 1) {
     radius = Math.max(0, radius);
     const bleed01 = opts.bleed / 100, op = opts.opacity, col = opts.color;
     const reach = radius * 2.5;
@@ -200,7 +218,7 @@ window.SUMI = window.SUMI || {};
     const band = (k, lo, hi) => Math.min(BUCKETS - 1, Math.floor((k - lo) / (hi - lo) * BUCKETS));
     const bandAlpha = (i, lo, hi) => lo + (i + 0.5) * (hi - lo) / BUCKETS;
     const tails = [];
-    const count = Math.floor(20 + 180 * amount);
+    const count = Math.floor((20 + 180 * amount) * density);
     for (let i = 0; i < count; i++) {
       const a = dir + rng.gauss() * 0.5;
       const d = Math.pow(rng.next(), 1.4) * reach;
@@ -240,7 +258,7 @@ window.SUMI = window.SUMI || {};
     }
     // micro-mist
     const mist = Array.from({ length: BUCKETS }, () => new Path2D());
-    const dots = Math.floor(60 + 260 * amount);
+    const dots = Math.floor((60 + 260 * amount) * density);
     for (let i = 0; i < dots; i++) {
       const a = dir + rng.gauss() * 0.9, d = Math.pow(rng.next(), 0.8) * reach * 1.2;
       const path = mist[band(rng.range(0.3, 0.8), 0.3, 0.8)];
@@ -327,10 +345,16 @@ window.SUMI = window.SUMI || {};
   };
   // `detail` is the radius that picks the edge detail (default: r). The wash brush passes one
   // value per stroke, so the outline doesn't jump as a speed-thinned stroke changes width.
-  function washRaw(ctx, rng, x, y, r, layers, opts, detail = r) {
+  // `q` is the wash brush's quality: maxDepth caps the outline detail, alphaK darkens each layer
+  // to make up for fewer layers, edges is how many layers get the edge line.
+  const WASH_FULL = { maxDepth: 5, alphaK: 1, edges: Infinity };
+  function washRaw(ctx, rng, x, y, r, layers, opts, detail = r, q = WASH_FULL) {
     r = Math.max(0.5, r);
     // edge detail scales with size: small dabs don't need 320-vertex outlines
-    const baseDepth = detail < 6 ? 1 : detail < 24 ? 2 : 3, layerDepth = detail < 24 ? 1 : 2;
+    let baseDepth = detail < 6 ? 1 : detail < 24 ? 2 : 3, layerDepth = detail < 24 ? 1 : 2;
+    while (baseDepth + layerDepth > q.maxDepth) { // smooth the silhouette first, keep the layers apart
+      if (baseDepth > 1) baseDepth--; else if (layerDepth > 1) layerDepth--; else break;
+    }
     const base = Array.from({ length: 10 }, (_, i) =>
       ({ x: x + Math.cos(i / 10 * TAU) * r, y: y + Math.sin(i / 10 * TAU) * r }));
     const shape = clampPts(ink.deformPolygon(base, baseDepth, 0.45, rng), x, y, 1.8 * r);
@@ -339,9 +363,10 @@ window.SUMI = window.SUMI || {};
     for (let k = 0; k < layers; k++) {
       const p = clampPts(ink.deformPolygon(shape, layerDepth, 0.3, rng), x, y, 1.8 * r);
       tracePoly(ctx, p);
-      ctx.fillStyle = ink.rgba(opts.color, opts.opacity * rng.range(0.02, 0.05));
+      ctx.fillStyle = ink.rgba(opts.color, opts.opacity * rng.range(0.02, 0.05) * q.alphaK);
       ctx.fill();
-      ctx.strokeStyle = ink.rgba(opts.color, opts.opacity * 0.04);
+      if (k >= q.edges) continue;
+      ctx.strokeStyle = ink.rgba(opts.color, opts.opacity * 0.04 * q.alphaK);
       ctx.stroke();
     }
   }
@@ -517,13 +542,20 @@ window.SUMI = window.SUMI || {};
 
   raw.spray = {
     layer: 'ink',
-    start() {},
+    start(st) { st.travel = 0; },
     segment(st, a, b, w, dir) {
-      if (Math.hypot(b.x - a.x, b.y - a.y) < 0.01) return;
-      sprayRaw(st.ctx, st.rng, b.x, b.y, dir, w * 0.5, 0.08 + st.opts.splatter / 100 * 0.9, st.opts);
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len < 0.01) return;
+      const gap = st.opts.sprayGap;
+      if (gap > 0) { // a burst once the pen has travelled `gap` px since the last one
+        st.travel = (st.travel || 0) + len;
+        if (st.travel < gap) return;
+        st.travel = Math.min(st.travel - gap, gap);
+      }
+      sprayRaw(st.ctx, st.rng, b.x, b.y, dir, w * 0.5, 0.08 + st.opts.splatter / 100 * 0.9, st.opts, st.opts.sprayDensity);
     },
     dab(st, p) {
-      sprayRaw(st.ctx, st.rng, p.x, p.y, st.wind, st.opts.size * 0.7, 0.1 + st.opts.splatter / 100 * 0.9, st.opts);
+      sprayRaw(st.ctx, st.rng, p.x, p.y, st.wind, st.opts.size * 0.7, 0.1 + st.opts.splatter / 100 * 0.9, st.opts, st.opts.sprayDensity);
     },
     end() {},
   };
@@ -575,13 +607,16 @@ window.SUMI = window.SUMI || {};
     },
   };
 
+  // the wash brush's quality options as washRaw takes them (6 layers is full quality, alphaK 1)
+  const washQuality = o => ({ maxDepth: o.washDetail, alphaK: 6 / o.washLayers, edges: Math.round(o.washLayers * o.washEdge) });
   raw.wash = {
     layer: 'wash',
     start(st) { st.carry = 0; },
     segment(st, a, b, w) {
-      stamp(st, a, b, Math.max(2, 0.4 * w), (x, y) => washRaw(st.ctx, st.rng, x, y, w * 0.55, 6, st.opts, st.opts.size * 0.55));
+      const o = st.opts, q = washQuality(o);
+      stamp(st, a, b, Math.max(2, 0.4 * w), (x, y) => washRaw(st.ctx, st.rng, x, y, w * 0.55, o.washLayers, o, o.size * 0.55, q));
     },
-    dab(st, p) { washRaw(st.ctx, st.rng, p.x, p.y, st.opts.size * 0.55, 6, st.opts); },
+    dab(st, p) { const o = st.opts; washRaw(st.ctx, st.rng, p.x, p.y, o.size * 0.55, o.washLayers, o, o.size * 0.55, washQuality(o)); },
     end() {},
   };
 

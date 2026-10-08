@@ -70,6 +70,24 @@
       <div class="ctl"><div class="ctl-head"><label>Grain <i>paper texture</i></label><b id="v-grain">60</b></div><input type="range" id="s-grain" min="0" max="100" value="60" /></div>
     </div>
 
+    <details class="quality" open>
+      <summary class="section-title">Quality <span id="costMeter" class="meter" title="Time this brush takes to draw per 12 px of painting, measured on this device">…</span></summary>
+      <div class="section sliders">
+        <div class="row btn-row" id="qualityPresets" role="group" aria-label="Quality presets">
+          <button class="ghost" data-preset="full" title="Today's look; slowest">Full</button>
+          <button class="ghost" data-preset="balanced" title="Close to Full at about half the cost">Balanced</button>
+          <button class="ghost" data-preset="fast" title="Lightest to draw; sparser spray, flatter wash">Fast</button>
+        </div>
+        <p class="quality-name">preset: <b id="qualityName">balanced</b></p>
+        <div class="ctl"><div class="ctl-head"><label for="s-sprayDensity">Spray density <i>droplets per burst</i></label><b id="v-sprayDensity">80%</b></div><input type="range" id="s-sprayDensity" min="10" max="100" step="5" value="80" /></div>
+        <div class="ctl"><div class="ctl-head"><label for="s-sprayGap">Spray spacing <i>between bursts</i></label><b id="v-sprayGap">4 px</b></div><input type="range" id="s-sprayGap" min="0" max="12" step="1" value="4" /></div>
+        <div class="ctl"><div class="ctl-head"><label for="s-washLayers">Wash layers <i>glazes per stamp</i></label><b id="v-washLayers">4</b></div><input type="range" id="s-washLayers" min="2" max="6" step="1" value="4" /></div>
+        <div class="ctl"><div class="ctl-head"><label for="s-washDetail">Wash edge detail <i>outline points</i></label><b id="v-washDetail">max 160</b></div><input type="range" id="s-washDetail" min="2" max="5" step="1" value="4" /></div>
+        <div class="ctl"><div class="ctl-head"><label for="s-washEdge">Wash edge lines <i>darker rim</i></label><b id="v-washEdge">2 of 4</b></div><input type="range" id="s-washEdge" min="0" max="100" step="5" value="50" /></div>
+        <p id="costWarn" class="cost-warn" role="status" hidden></p>
+      </div>
+    </details>
+
     <div class="section replay">
       <label class="section-title" for="replaySpeed">Replay — your recorded strokes</label>
       <div class="row btn-row">
