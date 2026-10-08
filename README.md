@@ -198,8 +198,10 @@ Measured per 12 px of painting at size 34 on a desktop PC, at 1× pixel density:
 **In the app**, the **Quality** panel has the presets and a slider for each option. It
 starts on Balanced; once a slider moves off a preset, it reads "custom". The meter in the
 panel's heading shows the current brush's drawing time, measured on your device whenever a
-setting changes: green under 4 ms per move, amber under 8 ms, red from 8 ms. At red, a
-warning names the settings to lower, because painting may stutter.
+setting changes: green under 4 ms per move, yellow under 8 ms, amber from 8 ms. From 8 ms,
+painting may stutter. An alert then appears in the panel naming the settings to lower, with a
+short pop-up when you first cross the line. Both are styled after shadcn/ui's Alert: an amber
+triangle icon (Lucide `triangle-alert`) and title, with the details in muted text.
 
 ## Rendering
 

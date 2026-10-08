@@ -84,7 +84,11 @@
         <div class="ctl"><div class="ctl-head"><label for="s-washLayers">Wash layers <i>glazes per stamp</i></label><b id="v-washLayers">4</b></div><input type="range" id="s-washLayers" min="2" max="6" step="1" value="4" /></div>
         <div class="ctl"><div class="ctl-head"><label for="s-washDetail">Wash edge detail <i>outline points</i></label><b id="v-washDetail">max 160</b></div><input type="range" id="s-washDetail" min="2" max="5" step="1" value="4" /></div>
         <div class="ctl"><div class="ctl-head"><label for="s-washEdge">Wash edge lines <i>darker rim</i></label><b id="v-washEdge">2 of 4</b></div><input type="range" id="s-washEdge" min="0" max="100" step="5" value="50" /></div>
-        <p id="costWarn" class="cost-warn" role="status" hidden></p>
+        <div id="costWarn" class="alert warn" role="status" hidden>
+          <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <div class="alert-title">Painting may stutter</div>
+          <div class="alert-desc" id="costWarnText"></div>
+        </div>
       </div>
     </details>
 

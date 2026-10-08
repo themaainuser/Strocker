@@ -52,4 +52,24 @@
     T.assert(warn.hidden, 'warning cleared');
     T.assert(meter.classList.contains('light'));
   });
+
+  T.test('app: warnings are alerts: amber icon and title, details below; hidden really hides', async () => {
+    const a = await app(), d = a.w.document, warn = d.getElementById('costWarn'), css = el => a.w.getComputedStyle(el);
+    a.app.setTool('wash');
+    a.app.showCost(a.app.COST.heavy + 1);
+    const icon = warn.querySelector('svg.alert-icon'), title = warn.querySelector('.alert-title'), desc = warn.querySelector('.alert-desc');
+    T.assert(icon && title && desc, 'icon, title and description');
+    T.eq(css(warn).display, 'grid');
+    T.eq(css(title).color, css(warn).color, 'title takes the alert colour');
+    T.assert(css(desc).color !== css(warn).color, 'description is muted');
+    T.assert(/wash/i.test(desc.textContent) && /ms/.test(desc.textContent), desc.textContent);
+    // the pop-up shown on turning heavy is the same kind of alert; ordinary pop-ups are not
+    const toast = d.getElementById('toast');
+    T.assert(toast.classList.contains('alert') && toast.querySelector('svg.alert-icon'), 'heavy pop-up is an alert');
+    T.assert(/stutter/i.test(toast.querySelector('.alert-title').textContent));
+    d.querySelector('#brushGrid button[data-brush="dry"]').click();
+    T.assert(!toast.classList.contains('alert') && !toast.querySelector('svg'), 'plain pop-up after');
+    a.app.showCost(a.app.COST.light / 2);
+    T.eq(css(warn).display, 'none', 'hidden attribute wins over the alert layout');
+  });
 })();

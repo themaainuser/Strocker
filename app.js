@@ -38,11 +38,18 @@ const strokeOpts = () => ({
 });
 
 // ---------- feedback ----------
-function toastMsg(m) {
-  toast.textContent = m;
+// { warn: true } shows the pop-up as an alert, like the cost warning: amber icon and title
+function toastMsg(m, { warn = false } = {}) {
+  toast.classList.toggle('alert', warn);
+  toast.classList.toggle('warn', warn);
+  if (warn) {
+    const title = document.createElement('div');
+    title.className = 'alert-title'; title.textContent = m;
+    toast.replaceChildren(document.querySelector('#costWarn .alert-icon').cloneNode(true), title);
+  } else toast.textContent = m;
   toast.classList.add('show');
   clearTimeout(toastMsg.t);
-  toastMsg.t = setTimeout(() => toast.classList.remove('show'), 1600);
+  toastMsg.t = setTimeout(() => toast.classList.remove('show'), warn ? 3200 : 1600); // warnings stay longer
 }
 function log(head, rest = '') {
   const d = document.createElement('div');
@@ -462,19 +469,19 @@ function brushCost(tool, opts, dpr) {
 }
 const costLevel = ms => (ms >= COST.heavy ? 'heavy' : ms >= COST.light ? 'moderate' : 'light');
 const COST_ADVICE = {
-  spray: 'Lower spray density, raise spray spacing, pick a smaller size, or choose Balanced or Fast.',
-  wash: 'Use fewer wash layers or edge lines, less edge detail, a smaller size, or Balanced or Fast.',
+  spray: 'Try lower density, wider spacing, a smaller size, or Balanced or Fast.',
+  wash: 'Try fewer layers or edge lines, less edge detail, a smaller size, or Balanced or Fast.',
 };
 function showCost(ms, tool = S.tool) {
   const level = costLevel(ms), meter = $('costMeter'), warn = $('costWarn');
   meter.className = 'meter ' + level;
   meter.textContent = `${tool} · ${ms.toFixed(1)} ms`;
   warn.hidden = level !== 'heavy';
-  warn.textContent = level === 'heavy'
-    ? `⚠ Heavy: ${tool} takes about ${ms.toFixed(1)} ms per move on this device, so painting may stutter. ` +
-      (COST_ADVICE[tool] || 'Pick a smaller size or less splatter.')
+  $('costWarnText').textContent = level === 'heavy'
+    ? `${tool[0].toUpperCase() + tool.slice(1)} takes about ${ms.toFixed(1)} ms per move on this device. ` +
+      (COST_ADVICE[tool] || 'Try a smaller size or less splatter.')
     : '';
-  if (level === 'heavy' && lastCostLevel !== 'heavy') toastMsg('⚠ heavy brush settings: painting may stutter');
+  if (level === 'heavy' && lastCostLevel !== 'heavy') toastMsg('Heavy brush settings: painting may stutter', { warn: true });
   lastCostLevel = level;
   return { ms, level, tool };
 }

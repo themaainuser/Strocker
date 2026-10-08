@@ -3,6 +3,7 @@
   --bg:#0e0e10; --panel:#141416; --line:#242428;
   --txt:#ece9e2; --dim:#8b8b90; --accent:#e8e2d5;
   --paper:#f4f1ea;
+  --card:#1c1c1f; --amber:oklch(66.6% 0.179 58.318); /* Tailwind amber-600 */
 }
 html,body{height:100%;background:var(--bg);color:var(--txt);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 #app{display:flex;height:100vh;overflow:hidden}
@@ -53,10 +54,17 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 .section-title .meter{color:var(--dim);font-variant-numeric:tabular-nums;letter-spacing:.04em;text-transform:none}
 .section-title .meter.light{color:#6f6}
 .section-title .meter.moderate{color:#e0b84a}
-.section-title .meter.heavy{color:#ff9a9a}
+.section-title .meter.heavy{color:var(--amber)}
 .quality-name{font-size:11px;color:var(--dim)}
 .quality-name b{color:var(--accent);font-weight:400}
-.cost-warn{font-size:11px;line-height:1.5;color:#ffc2b4;background:rgba(255,110,80,.08);border-left:2px solid #ff9a9a;padding:6px 8px;border-radius:0 6px 6px 0}
+/* alert: the layout of shadcn/ui's Alert — icon column, title, muted description */
+.alert{display:grid;grid-template-columns:16px 1fr;column-gap:12px;row-gap:2px;align-items:start;width:100%;
+  border:1px solid var(--line);border-radius:10px;padding:12px 16px;background:var(--card);color:var(--txt);font-size:12px;line-height:1.45}
+.alert[hidden]{display:none}
+.alert.warn{color:var(--amber)}
+.alert-icon{width:16px;height:16px;transform:translateY(2px);color:currentColor}
+.alert-title{grid-column:2;min-height:16px;font-weight:600;letter-spacing:-.025em;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1}
+.alert-desc{grid-column:2;color:var(--dim);line-height:1.625}
 .rec-head{display:flex;justify-content:space-between;font-size:12px}
 .rec-head span{color:var(--dim)}
 .console pre{background:#0a0a0c;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;line-height:1.5;color:#b8f0b8;white-space:pre-wrap;min-height:86px}
@@ -73,4 +81,6 @@ kbd{background:#222;border:1px solid #333;border-radius:4px;padding:0 5px;font-s
 .stamp::before{content:'◯ ';letter-spacing:0}
 #toast{position:absolute;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:#111;color:#fff;padding:8px 16px;border-radius:20px;font-size:12px;opacity:0;transition:.3s;pointer-events:none;z-index:4}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.alert{width:max-content;max-width:calc(100% - 32px);padding:12px 16px;border-radius:10px;background:var(--panel)}
+#toast.warn{color:var(--amber)}
 @media(max-width:860px){#app{flex-direction:column}#panel{width:100%;min-width:0;max-height:46vh}#stage{flex:1}}
