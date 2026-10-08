@@ -219,6 +219,28 @@ Gzip: `SUMI.recordingGzip` / `SUMI.readRecording` handle `.json.gz` and plain JS
 with `SUMI_PLAYER_READY` resolving once it plays. The app's JSON and HTML buttons use both.
 The inlined player code (~55 KB) is left uncompressed: compressing it would need eval.
 
+## WebM rendered frame by frame (done 2026-10-08, branch `feat/webm-frames`)
+
+The real-time recorder (MediaRecorder) dropped frames whenever drawing was slow, and always took
+the video's full length. `SUMI.renderWebM` instead runs the replay on a clock that moves one
+frame per step. Each frame is drawn, then encoded with WebCodecs `VideoEncoder` (VP9, else VP8,
+30 fps, a keyframe every 2 s), so the video is always smooth.
+- **Measured:** a 13.1 s video took 1.6 s at 1200×800 (8× real time) and 6.5 s at 2400×1600
+  (2×). Its last frame matches the finished picture apart from compression noise.
+- **The file writer is built in.** WebCodecs only produces encoded frames, so `export.js` has a
+  ~100-line WebM writer: EBML header, Segment with SeekHead, Info (1 ms ticks, Duration), one
+  track, a Cluster per keyframe, and Cues. Element IDs were checked against the IETF EBML and
+  Matroska specs. Unlike the MediaRecorder file, it has a duration and a seek index; it decodes
+  and seeks even in headless Chrome.
+- **Fallback:** without WebCodecs, or without a VP9/VP8 encoder (`err.code === 'no-encoder'`),
+  the app falls back to `recordWebM`.
+- **Testing under virtual time.** The headless runner's virtual clock jumps to the next timer
+  whenever the page is idle, which an encoder working on another thread looks like. So video
+  tests await through `T.busy(promise)`, which keeps the page busy with message-channel tasks.
+  The tests check the file structure byte by byte: frame times, keyframes, duration, and that
+  SeekHead and Cues point at real elements. Two broken writers were caught: cue positions off
+  by one, and every frame flagged as a keyframe.
+
 ## Note
 
 The "live console" (`refreshCode`) was only a display and couldn't reproduce a stroke.

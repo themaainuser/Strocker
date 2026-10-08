@@ -106,6 +106,113 @@
     T.assert(job.stream.getTracks().every(t => t.readyState === 'ended'), 'tracks still live');
   });
 
+  // a small EBML reader for checking the WebM files: { id: '1a45dfa3', at, size, data, kids }
+  function ebml(bytes, start = 0, end = bytes.length, out = []) {
+    const vint = (p, keepMarker) => {
+      let len = 1; while (len <= 8 && !(bytes[p] & (0x80 >> (len - 1)))) len++;
+      let v = keepMarker ? bytes[p] : bytes[p] & (0xff >> len);
+      for (let i = 1; i < len; i++) v = v * 256 + bytes[p + i];
+      return { v, len };
+    };
+    const MASTER = ['18538067', '114d9b74', '4dbb', '1549a966', '1654ae6b', 'ae', 'e0', '1f43b675', '1c53bb6b', 'bb', 'b7', '1a45dfa3'];
+    for (let p = start; p < end;) {
+      const id = vint(p, true), size = vint(p + id.len);
+      const at = p, body = p + id.len + size.len;
+      const hex = Array.from(bytes.subarray(p, p + id.len), b => b.toString(16).padStart(2, '0')).join('');
+      const node = { id: hex, at, body, size: size.v, data: bytes.subarray(body, body + size.v) };
+      if (MASTER.includes(hex)) node.kids = ebml(bytes, body, body + size.v);
+      out.push(node);
+      p = body + size.v;
+    }
+    return out;
+  }
+  const uintOf = d => d.reduce((v, b) => v * 256 + b, 0);
+  const find = (nodes, id) => nodes.find(n => n.id === id);
+  const all = (nodes, id) => nodes.filter(n => n.id === id);
+
+  T.test('export: WebM renders frame by frame into a valid file: every frame on time, keyframes every 2 s', async () => {
+    if (!SUMI.canRenderWebM()) T.skip('no WebCodecs here');
+    let t = 0;
+    const { strokes } = recording(() => (t += 16.7)); // ~6 s of drawing
+    const progress = [];
+    const job = SUMI.renderWebM(strokes, { canvas: CANVAS, speed: 2, fps: 30, hold: 300, onProgress: p => progress.push(p) });
+    const blob = await T.busy(job.done);
+    T.assert(blob instanceof Blob && blob.type === 'video/webm', 'a WebM blob');
+    const bytes = new Uint8Array(await blob.arrayBuffer()), top = ebml(bytes);
+    const head = find(top, '1a45dfa3'), seg = find(top, '18538067');
+    T.eq(new TextDecoder().decode(find(head.kids, '4282').data), 'webm', 'DocType');
+    T.eq(seg.body + seg.size, bytes.length, 'the segment size covers the file exactly');
+    const info = find(seg.kids, '1549a966'), track = find(find(seg.kids, '1654ae6b').kids, 'ae');
+    T.eq(uintOf(find(info.kids, '2ad7b1').data), 1e6, 'timestamps in ms');
+    T.assert(/^V_VP[89]$/.test(new TextDecoder().decode(find(track.kids, '86').data)), 'VP9 or VP8');
+    const video = find(track.kids, 'e0');
+    T.eq(uintOf(find(video.kids, 'b0').data), W); T.eq(uintOf(find(video.kids, 'ba').data), H);
+    // every frame, in order, 1/30 s apart, keyframes at 0 s, 2 s, 4 s...
+    const blocks = [];
+    for (const c of all(seg.kids, '1f43b675')) {
+      const ct = uintOf(find(c.kids, 'e7').data);
+      for (const b of all(c.kids, 'a3')) blocks.push({ t: ct + ((b.data[1] << 8) | b.data[2]), key: !!(b.data[3] & 0x80) });
+    }
+    const n = Math.round(job.duration / (1000 / 30));
+    T.eq(blocks.length, n, 'frame count');
+    blocks.forEach((b, i) => {
+      T.eq(b.t, Math.round(i * 1000 / 30), 'frame ' + i + ' time');
+      T.eq(b.key, i % 60 === 0, 'frame ' + i + ' keyframe');
+    });
+    const dur = new DataView(find(info.kids, '4489').data.slice().buffer).getFloat64(0);
+    T.near(dur, n * 1000 / 30, 0.5, 'duration');
+    // the seek index points at real elements
+    const at = pos => Array.from(bytes.subarray(seg.body + pos, seg.body + pos + 4), x => x.toString(16).padStart(2, '0')).join('');
+    for (const s of find(seg.kids, '114d9b74').kids) {
+      const id = Array.from(find(s.kids, '53ab').data, x => x.toString(16).padStart(2, '0')).join('');
+      T.eq(at(uintOf(find(s.kids, '53ac').data)).slice(0, id.length), id, 'SeekHead entry for ' + id);
+    }
+    const cues = all(find(seg.kids, '1c53bb6b').kids, 'bb');
+    T.eq(cues.length, all(seg.kids, '1f43b675').length, 'one cue per cluster');
+    for (const q of cues) T.eq(at(uintOf(find(find(q.kids, 'b7').kids, 'f1').data)), '1f43b675', 'cue points at a cluster');
+    T.assert(progress.length > 5 && progress.every((p, i) => !i || p >= progress[i - 1]) && progress[progress.length - 1] === 1, 'progress rises to 1');
+  });
+
+  T.test('export: a rendered video ends on exactly the finished picture, without animation frames', async () => {
+    if (!SUMI.canRenderWebM()) T.skip('no WebCodecs here');
+    const raf = window.requestAnimationFrame;
+    window.requestAnimationFrame = () => 0; // a hidden or throttled page
+    try {
+      let t = 0;
+      const { live, strokes } = recording(() => (t += 16.7));
+      const job = SUMI.renderWebM(strokes, { canvas: CANVAS, speed: 8, hold: 0 });
+      T.assert(await T.busy(job.done) instanceof Blob, 'finished');
+      for (const n of LAYERS) T.eq(T.hash(job.stage.layers[n]), T.hash(live[n].canvas), n);
+    } finally { window.requestAnimationFrame = raf; }
+  });
+
+  T.test('export: a render can be cancelled, and its options are checked', async () => {
+    if (!SUMI.canRenderWebM()) T.skip('no WebCodecs here');
+    const { strokes } = recording();
+    for (const bad of [{ fps: 0 }, { fps: 500 }, { hold: -1 }, { speed: 0 }]) {
+      let e = null; try { SUMI.renderWebM(strokes, { canvas: CANVAS, ...bad }); } catch (x) { e = x; }
+      T.assert(e instanceof TypeError, JSON.stringify(bad));
+    }
+    const job = SUMI.renderWebM(strokes, { canvas: CANVAS, speed: 0.25 });
+    job.cancel();
+    T.eq(await T.busy(job.done), null, 'cancelled render resolves null');
+  });
+
+  T.test('export: a rendered video opens on paper', async () => {
+    if (!SUMI.canRenderWebM()) T.skip('no WebCodecs here');
+    const { strokes } = recording();
+    const blob = await T.busy(SUMI.renderWebM(strokes.slice(0, 2), { canvas: CANVAS, speed: 4, hold: 200 }).done);
+    const v = document.createElement('video'); v.muted = true; v.src = URL.createObjectURL(blob);
+    const decoding = (p) => T.busy(p, 1e6).catch(() => false); // a browser that can't decode never answers
+    if (!await decoding(new Promise(r => { v.onloadeddata = () => r(true); v.onerror = () => r(false); }))) T.skip('this browser cannot decode WebM here');
+    T.assert(Number.isFinite(v.duration) && v.duration > 0.2, 'the player knows the length: ' + v.duration);
+    v.currentTime = 0;
+    if (!await decoding(new Promise(r => { v.onseeked = () => r(true); }))) T.skip('this browser cannot seek WebM here');
+    const c = T.canvas(v.videoWidth, v.videoHeight); c.ctx.drawImage(v, 0, 0);
+    const [r, g, b] = T.rgb(T.pixels(c.canvas), 5, 5);
+    T.assert(r > 200 && g > 200 && b > 190, 'first frame corner is ' + [r, g, b]);
+  });
+
   T.test('export: standalone HTML is one self-contained file', () => {
     const { strokes } = recording(), html = SUMI.standaloneHTML(strokes, { canvas: CANVAS, title: '</title><script>alert(1)</script>' });
     T.assert(html.startsWith('<!DOCTYPE html>'), 'doctype');

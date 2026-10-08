@@ -69,8 +69,12 @@ function refreshExport() {
     (base ? ' · poster not exported' : ''); // Replay keeps the poster; exports hold the strokes only
   $('btnExportJSON').disabled = $('btnExportHTML').disabled = !n;
   // while a video records, the button is its Stop button
-  $('btnExportWebM').disabled = videoJob ? false : !n || !CAN_RECORD_VIDEO;
-  $('btnExportWebM').textContent = videoJob ? '■ stop video' : '↓ WebM';
+  const vb = $('btnExportWebM'), pct = Math.round((videoProgress || 0) * 100);
+  vb.disabled = videoJob ? false : !n || !canMakeVideo();
+  // short labels keep the button on one line; the spoken label says what a click does
+  vb.textContent = !videoJob ? '↓ WebM' : videoProgress == null ? '■ stop' : `■ ${pct}%`;
+  if (videoJob) vb.setAttribute('aria-label', videoProgress == null ? 'Stop recording the video' : `Stop the video (${pct}% rendered)`);
+  else vb.removeAttribute('aria-label');
   if (!n) {
     codeOut.textContent = '// paint something: every stroke is recorded\n// export it as JSON, a standalone HTML file or WebM';
     return;
@@ -503,10 +507,13 @@ $('btnClear').onclick = () => {
   toastMsg('cleared');
 };
 // ---------- export (js/export.js) ----------
-// WebM needs canvas capture + a WebM encoder (Safari records MP4 only, so it gets a disabled button)
+// WebM is drawn and encoded frame by frame where WebCodecs exists, so it is smooth however fast
+// this device draws. Otherwise it is recorded in real time, which needs canvas capture and a WebM
+// MediaRecorder (Safari records MP4 only, so without WebCodecs it gets a disabled button).
 const CAN_RECORD_VIDEO = typeof MediaRecorder !== 'undefined' && !!HTMLCanvasElement.prototype.captureStream &&
   ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].some(t => MediaRecorder.isTypeSupported(t));
-let videoJob = null;
+const canMakeVideo = () => SUMI.canRenderWebM() || CAN_RECORD_VIDEO;
+let videoJob = null, videoProgress = null; // progress 0..1 while rendering frame by frame
 const fileName = ext => `sumi-${S.seed}-${Date.now()}.${ext}`;
 function download(blob, name) {
   const url = URL.createObjectURL(blob), a = document.createElement('a');
@@ -527,22 +534,33 @@ function exportHTML() {
   return SUMI.standaloneHTMLGzip(strokes, { canvas: exportCanvas(), title: 'SUMI strokes · ' + S.seed, ...exportPlayback() });
 }
 function exportWebM(extra = {}) {
-  if (!strokes.length || videoJob || !CAN_RECORD_VIDEO) return null;
-  let job;
+  if (!strokes.length || videoJob || !canMakeVideo()) return null;
+  const opts = { canvas: exportCanvas(), ...exportPlayback(), ...extra }, recs = strokes.slice();
+  const record = () => watchVideo(SUMI.recordWebM(recs, opts), false);
   try {
-    job = SUMI.recordWebM(strokes.slice(), { canvas: exportCanvas(), ...exportPlayback(), ...extra });
+    if (!SUMI.canRenderWebM()) return record();
+    const progress = p => { videoProgress = p; refreshExport(); };
+    return watchVideo(SUMI.renderWebM(recs, { ...opts, onProgress: progress }), true, record);
   } catch (err) {
     toastMsg('video export failed: ' + err.message);
     return null;
   }
-  videoJob = job;
+}
+// runs a video job; a frame-by-frame render that finds no encoder hands over to `fallback`
+function watchVideo(job, rendered, fallback) {
+  videoJob = job; videoProgress = rendered ? 0 : null;
   refreshExport();
-  toastMsg('recording video in real time…');
+  toastMsg(rendered ? 'rendering video frame by frame…' : 'recording video in real time…');
   job.done
-    .then(blob => { if (blob) { download(blob, fileName('webm')); log('export', 'WebM · ' + (blob.size / 1024).toFixed(0) + ' KB'); } },
-      err => toastMsg('video failed: ' + err.message))
+    .then(blob => {
+      if (blob) { download(blob, fileName('webm')); log('export', `WebM · ${sizeLabel(blob.size)} · ${rendered ? 'frame by frame' : 'real time'}`); }
+    }, err => {
+      if (fallback && err && err.code === 'no-encoder') {
+        try { fallback(); } catch (e) { toastMsg('video export failed: ' + e.message); }
+      } else toastMsg('video failed: ' + (err && err.message));
+    })
     .finally(() => {
-      if (videoJob === job) videoJob = null;
+      if (videoJob === job) { videoJob = null; videoProgress = null; }
       refreshExport();
     });
   return job;
@@ -565,7 +583,7 @@ $('btnExportHTML').onclick = async () => {
 $('btnExportWebM').onclick = () => {
   if (videoJob) { videoJob.cancel(); toastMsg('video stopped'); } else exportWebM();
 };
-if (!CAN_RECORD_VIDEO) $('btnExportWebM').title = 'this browser cannot record canvas video';
+if (!canMakeVideo()) $('btnExportWebM').title = 'this browser cannot make WebM video';
 
 $('btnSave').onclick = () => {
   const out = layers.exportCanvas(S.paper && S.grain > 0 ? grainCanvas : null, 'ECLIPSE');

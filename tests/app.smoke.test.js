@@ -144,8 +144,10 @@ T.test('app: WebM button records and downloads a video', async () => {
   a.w.HTMLAnchorElement.prototype.click = function () { got.push(this.download); };
   a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
   const job = a.app.exportWebM({ speed: Infinity, hold: 50 });
-  T.assert(!btn.disabled && /stop/i.test(btn.textContent), 'button becomes Stop while recording: ' + btn.textContent);
-  T.assert(await job.done, 'got a video');
+  T.assert(!btn.disabled && btn.textContent.startsWith('■') && /stop/i.test(btn.getAttribute('aria-label') || ''),
+    'button becomes Stop while making the video: ' + btn.textContent + ' / ' + btn.getAttribute('aria-label'));
+  T.assert(btn.scrollHeight <= btn.clientHeight + 1 && btn.getBoundingClientRect().height < 40, 'label stays on one line');
+  T.assert(await T.busy(job.done), 'got a video');
   await new Promise(r => setTimeout(r, 0));
   T.assert(got.some(n => /\.webm$/.test(n)), 'downloaded: ' + got.join());
   T.assert(!btn.disabled && /WebM/.test(btn.textContent), 'ready again');
@@ -157,14 +159,30 @@ T.test('app: a running WebM export can be stopped from its button', async () => 
   a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
   const job = a.app.exportWebM({ speed: 0.25 });
   btn.click();
-  T.eq(await job.done, null, 'cancelled video resolves null');
+  T.eq(await T.busy(job.done), null, 'cancelled video resolves null');
   await new Promise(r => setTimeout(r, 0));
   T.eq(got.length, 0, 'nothing downloaded');
   T.assert(/WebM/.test(btn.textContent), 'button reset: ' + btn.textContent);
 });
+T.test('app: without a frame-by-frame encoder, WebM falls back to real-time recording', async () => {
+  const a = await app(), got = [], calls = [];
+  a.w.HTMLAnchorElement.prototype.click = function () { got.push(this.download); };
+  a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
+  const noEncoder = Object.assign(new Error('this browser has no WebM video encoder'), { code: 'no-encoder' });
+  a.w.SUMI.canRenderWebM = () => true;
+  a.w.SUMI.renderWebM = () => { calls.push('render'); return { done: Promise.reject(noEncoder), cancel() {} }; };
+  a.w.SUMI.recordWebM = () => { calls.push('record'); return { done: Promise.resolve(new a.w.Blob(['x'], { type: 'video/webm' })), cancel() {}, stream: {} }; };
+  const btn = a.w.document.getElementById('btnExportWebM');
+  if (btn.disabled) T.skip('video export unavailable in this browser');
+  btn.click();
+  for (let i = 0; i < 50 && !got.length; i++) await new Promise(r => setTimeout(r, 10));
+  T.eq(calls.join(), 'render,record');
+  T.assert(got.some(n => /\.webm$/.test(n)), 'downloaded: ' + got.join());
+});
 T.test('app: a browser that cannot encode WebM gets a message, not an error', async () => {
   const a = await app();
   a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
+  a.w.SUMI.canRenderWebM = () => false;
   a.w.SUMI.recordWebM = () => { throw new Error('this browser cannot encode WebM'); };
   const btn = a.w.document.getElementById('btnExportWebM');
   if (btn.disabled) T.skip('video export unavailable in this browser');

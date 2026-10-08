@@ -280,4 +280,159 @@ ${boot}
     run.done.then(() => setTimeout(stop, hold), err => { failure = err; stop(); }); // hold the finished picture a moment
     return { done, run, stream, cancel() { cancelled = true; run.cancel(); stop(); } };
   };
+
+  // ---------- WebM rendered frame by frame (WebCodecs) ----------
+  // A minimal WebM writer: the EBML header, then a Segment holding a SeekHead, Info (1 ms ticks
+  // and the duration), one video track, Clusters of SimpleBlocks (a new one at each keyframe) and
+  // Cues. It is built in memory, so every size is exact. IDs are from the EBML and Matroska specs.
+  const ID = {
+    EBML: [0x1A, 0x45, 0xDF, 0xA3], EBMLVersion: [0x42, 0x86], EBMLReadVersion: [0x42, 0xF7],
+    EBMLMaxIDLength: [0x42, 0xF2], EBMLMaxSizeLength: [0x42, 0xF3], DocType: [0x42, 0x82],
+    DocTypeVersion: [0x42, 0x87], DocTypeReadVersion: [0x42, 0x85],
+    Segment: [0x18, 0x53, 0x80, 0x67], SeekHead: [0x11, 0x4D, 0x9B, 0x74], Seek: [0x4D, 0xBB],
+    SeekID: [0x53, 0xAB], SeekPosition: [0x53, 0xAC],
+    Info: [0x15, 0x49, 0xA9, 0x66], TimestampScale: [0x2A, 0xD7, 0xB1], Duration: [0x44, 0x89],
+    MuxingApp: [0x4D, 0x80], WritingApp: [0x57, 0x41],
+    Tracks: [0x16, 0x54, 0xAE, 0x6B], TrackEntry: [0xAE], TrackNumber: [0xD7], TrackUID: [0x73, 0xC5],
+    TrackType: [0x83], FlagLacing: [0x9C], CodecID: [0x86], Video: [0xE0], PixelWidth: [0xB0], PixelHeight: [0xBA],
+    Cluster: [0x1F, 0x43, 0xB6, 0x75], Timestamp: [0xE7], SimpleBlock: [0xA3],
+    Cues: [0x1C, 0x53, 0xBB, 0x6B], CuePoint: [0xBB], CueTime: [0xB3], CueTrackPositions: [0xB7],
+    CueTrack: [0xF7], CueClusterPosition: [0xF1],
+  };
+  const cat = parts => {
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
+    return out;
+  };
+  const bigEndian = (n, len) => {
+    const out = new Uint8Array(len);
+    for (let i = len - 1; i >= 0; i--) { out[i] = n % 256; n = Math.floor(n / 256); }
+    return out;
+  };
+  // an element size as an EBML variable-length number, in its shortest form (all ones is reserved)
+  const vsize = n => {
+    let len = 1; while (len < 8 && n >= 2 ** (7 * len) - 1) len++;
+    const out = bigEndian(n, len); out[0] |= 1 << (8 - len);
+    return out;
+  };
+  const el = (id, ...body) => { const data = cat(body); return cat([new Uint8Array(id), vsize(data.length), data]); };
+  const uint = (id, n, len) => { if (len == null) { len = 1; while (len < 8 && n >= 2 ** (8 * len)) len++; } return el(id, bigEndian(n, len)); };
+  const text = (id, s) => el(id, new TextEncoder().encode(s));
+  const float64 = (id, x) => { const b = new Uint8Array(8); new DataView(b.buffer).setFloat64(0, x); return el(id, b); };
+
+  // frames: [{ t: ms, key, data: Uint8Array }] in order, starting with a keyframe
+  function webmFile({ codecId, width, height, frames, duration }) {
+    const header = el(ID.EBML, uint(ID.EBMLVersion, 1), uint(ID.EBMLReadVersion, 1), uint(ID.EBMLMaxIDLength, 4),
+      uint(ID.EBMLMaxSizeLength, 8), text(ID.DocType, 'webm'), uint(ID.DocTypeVersion, 4), uint(ID.DocTypeReadVersion, 2));
+    const info = el(ID.Info, uint(ID.TimestampScale, 1e6), float64(ID.Duration, duration),
+      text(ID.MuxingApp, 'SUMI'), text(ID.WritingApp, 'SUMI brushes'));
+    const tracks = el(ID.Tracks, el(ID.TrackEntry, uint(ID.TrackNumber, 1), uint(ID.TrackUID, 1), uint(ID.TrackType, 1),
+      uint(ID.FlagLacing, 0), text(ID.CodecID, codecId), el(ID.Video, uint(ID.PixelWidth, width), uint(ID.PixelHeight, height))));
+    // a cluster per keyframe, or sooner if a block's 16-bit time offset would run out
+    const clusters = [];
+    let cur = null;
+    for (const f of frames) {
+      if (!cur || f.key || f.t - cur.t > 30000) { cur = { t: f.t, key: f.key, blocks: [] }; clusters.push(cur); }
+      const rel = f.t - cur.t; // track 1, time offset, keyframe flag, then the frame
+      cur.blocks.push(el(ID.SimpleBlock, new Uint8Array([0x81, (rel >> 8) & 0xff, rel & 0xff, f.key ? 0x80 : 0]), f.data));
+    }
+    const clusterBytes = clusters.map(c => el(ID.Cluster, uint(ID.Timestamp, c.t), ...c.blocks));
+    // positions are counted from the start of the Segment's data; the SeekHead stores them as
+    // 8-byte numbers, so its own size is known before they are
+    const seekHead = positions => el(ID.SeekHead, ...[ID.Info, ID.Tracks, ID.Cues].map((id, i) =>
+      el(ID.Seek, el(ID.SeekID, new Uint8Array(id)), uint(ID.SeekPosition, positions[i], 8))));
+    const infoAt = seekHead([0, 0, 0]).length, tracksAt = infoAt + info.length;
+    let at = tracksAt + tracks.length;
+    const cuePoints = [];
+    clusters.forEach((c, i) => {
+      if (c.key) cuePoints.push(el(ID.CuePoint, uint(ID.CueTime, c.t), el(ID.CueTrackPositions, uint(ID.CueTrack, 1), uint(ID.CueClusterPosition, at))));
+      at += clusterBytes[i].length;
+    });
+    const segment = el(ID.Segment, seekHead([infoAt, tracksAt, at]), info, tracks, ...clusterBytes, el(ID.Cues, ...cuePoints));
+    return new Blob([header, segment], { type: 'video/webm' });
+  }
+
+  // VP9, else VP8, at this size (the VP9 level covers sizes up to 4K)
+  async function encoderConfig(width, height, fps) {
+    const bitrate = Math.round(Math.min(8e6, Math.max(1e6, width * height * fps * 0.08)));
+    for (const [codec, codecId] of [['vp09.00.50.08', 'V_VP9'], ['vp8', 'V_VP8']]) {
+      const config = { codec, width, height, bitrate, framerate: fps };
+      try { if ((await VideoEncoder.isConfigSupported(config)).supported) return { config, codecId }; } catch { /* next codec */ }
+    }
+    return null;
+  }
+  const nextTask = () => new Promise(r => setTimeout(r, 0));
+
+  S.canRenderWebM = () => typeof VideoEncoder === 'function' && typeof VideoFrame === 'function';
+
+  // A video of the replay, drawn and encoded frame by frame with WebCodecs: each frame shows the
+  // picture at exactly its time, so the video is smooth however fast this device draws, and it is
+  // usually done faster than real time. Returns { done, cancel, stage, duration }: done resolves
+  // to the Blob (duration is then its length in ms), or to null after cancel(). It rejects with
+  // err.code 'no-encoder' when the browser can't encode VP9 or VP8; recordWebM is the fallback.
+  S.renderWebM = (strokes, opts = {}) => {
+    const { canvas, paper = PAPER, speed = 1, timing = 'recorded', gap = 150, stagger = 0, fps = 30, hold = 600, onProgress } = opts;
+    checkPlayback({ speed, timing, gap, stagger });
+    if (!finite(fps) || fps <= 0 || fps > 120) throw new TypeError('fps must be a number in (0, 120]');
+    if (!finite(hold) || hold < 0) throw new TypeError('hold must be a number ≥ 0');
+    if (!S.canRenderWebM()) throw Object.assign(new Error('this browser cannot encode video frame by frame'), { code: 'no-encoder' });
+    const data = JSON.parse(S.recordingJSON(strokes, { canvas, paper }));
+    const view = document.createElement('canvas');
+    const stage = sumiStage(S, data, view);
+    let cancelled = false;
+    const job = { stage, duration: 0, cancel() { cancelled = true; } };
+    job.done = (async () => {
+      const chosen = await encoderConfig(view.width, view.height, fps);
+      if (!chosen) throw Object.assign(new Error('this browser has no WebM video encoder (VP9 or VP8)'), { code: 'no-encoder' });
+      const frames = [];
+      let failure = null, wake = null;
+      const woken = () => new Promise(r => { wake = r; }); // the encoder took a frame, or failed
+      const enc = new VideoEncoder({
+        output: chunk => {
+          const bytes = new Uint8Array(chunk.byteLength); chunk.copyTo(bytes);
+          frames.push({ t: Math.round(chunk.timestamp / 1000), key: chunk.type === 'key', data: bytes });
+        },
+        error: e => { failure = e; if (wake) wake(); },
+      });
+      enc.addEventListener('dequeue', () => { if (wake) wake(); });
+      enc.configure(chosen.config);
+      const step = 1000 / fps, keyEvery = Math.max(1, Math.round(fps * 2));
+      let n = 0;
+      const encodeFrame = async () => {
+        const frame = new VideoFrame(view, { timestamp: Math.round(n * step * 1000) });
+        enc.encode(frame, { keyFrame: n % keyEvery === 0 });
+        frame.close();
+        n++;
+        while (enc.encodeQueueSize > 3 && !failure) await woken(); // let the encoder catch up
+        if (n % 8 === 0) await nextTask();
+      };
+      // the replay runs on a clock that moves exactly one frame per step
+      let now = 0;
+      const ticks = [];
+      const run = stage.play({ speed, timing, gap, stagger, clock: () => now, frame: cb => ticks.push(cb) });
+      const length = run.timeline.duration / speed;
+      try {
+        await encodeFrame(); // the opening frame
+        while (ticks.length && !cancelled && !failure) {
+          now += step;
+          ticks.shift()(); // applies every call due by now and redraws what they painted
+          await encodeFrame();
+          if (onProgress) onProgress(Math.min(1, now / Math.max(length, step)));
+        }
+        for (let i = Math.round(hold / step); i > 0 && !cancelled && !failure; i--) await encodeFrame(); // hold the finished picture
+        if (cancelled || failure) run.cancel(); // its frames stop coming, so don't wait for it
+        if (cancelled) return null;
+        if (failure) throw failure;
+        await run.done; // rejects if a brush threw
+        await enc.flush();
+        if (failure) throw failure;
+      } finally {
+        if (enc.state !== 'closed') enc.close();
+      }
+      if (onProgress) onProgress(1);
+      job.duration = n * step;
+      return webmFile({ codecId: chosen.codecId, width: view.width, height: view.height, frames, duration: job.duration });
+    })();
+    return job;
+  };
 })(window.SUMI);

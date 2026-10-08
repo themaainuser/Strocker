@@ -54,6 +54,24 @@
       }
       return s ? { x: sx / s, y: sy / s } : { x: NaN, y: NaN };
     },
+    // Headless runs use virtual time, which jumps to the next timer (often a test's timeout)
+    // whenever the page is idle, e.g. while a video encoder or decoder works on another thread.
+    // Awaits the promise with the page kept busy, so its clock waits too; gives up (rejects)
+    // after `spins` tasks, so a promise that never settles can't hang the run.
+    busy(promise, spins = 3e6) {
+      let done = false;
+      promise.then(() => { done = true; }, () => { done = true; });
+      const ch = new MessageChannel();
+      return new Promise((resolve, reject) => {
+        let n = 0;
+        ch.port1.onmessage = () => {
+          if (done) resolve(promise);
+          else if (++n > spins) reject(new Error('gave up waiting'));
+          else ch.port2.postMessage(0);
+        };
+        ch.port2.postMessage(0);
+      });
+    },
     hash(canvas) { // FNV-1a over the RGBA bytes
       const d = T.pixels(canvas).data;
       let h = 0x811c9dc5;

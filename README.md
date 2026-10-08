@@ -146,7 +146,7 @@ Three downloads:
 |---|---|
 | **↓ JSON** | The recording as a gzip-compressed `sumi-strokes` v1 document (`.json.gz`): `{ format, v, canvas, paper, strokes }`, each stroke in format v3. Load it back with `await SUMI.readRecording(fileOrBytes)`, which takes `.json.gz` or plain `.json` and validates the document and every stroke in full via `SUMI.validateStroke`. |
 | **↓ HTML** | One file with `rng.js`, `brushes.js`, `recorder.js` and `playback.js` inlined, plus a small player. The recording inside is gzip-compressed and unpacks itself on open. It animates the strokes at the replay speed and timing picked in the panel; click the canvas to replay. No other files and no network. |
-| **↓ WebM** | A video of the replay, recorded in real time at the replay speed (8× makes a short clip). While it records, the button reads **■ stop video**. Needs a browser that records WebM: Chrome, Edge or Firefox. In Safari the button is disabled. |
+| **↓ WebM** | A video of the replay at the replay speed (8× makes a short clip), 30 fps, VP9 (VP8 if VP9 isn't available). It is drawn and encoded frame by frame with WebCodecs, so it is smooth however fast your device draws, and usually done faster than real time. A 13 s video at 1200×800 rendered in 1.6 s (8× real time), or in 6.5 s at 2× pixel density. While it renders, the button shows the progress (**■ 45%**); click it to stop. The file has its length and a seek index. Without WebCodecs it falls back to recording in real time (**■ stop**), which needs Chrome, Edge or Firefox; then Safari gets a disabled button. |
 
 The HTML player draws the same layers as the app: wash multiplied onto the paper, then
 ink, then shards. Its layer pixels match the app's in the same browser. Mask strokes are
@@ -160,7 +160,12 @@ files.
 From code: `SUMI.recordingJSON(strokes, { canvas })` (plain text) and
 `await SUMI.recordingGzip(strokes, { canvas })` (a Blob), `SUMI.standaloneHTML(strokes, { canvas, speed, timing, gap, stagger })`
 (recording as plain JSON inside) and `await SUMI.standaloneHTMLGzip(...)` (compressed inside),
-and `SUMI.recordWebM(strokes, { canvas, speed, fps })`. Gzip uses the browser's built-in
+and the video: `SUMI.renderWebM(strokes, { canvas, speed, fps, hold, onProgress })` renders
+frame by frame (when `SUMI.canRenderWebM()`), and `SUMI.recordWebM(strokes, { canvas, speed, fps })`
+records in real time. `renderWebM` returns `{ done, cancel, stage, duration }`. `done` resolves
+to the Blob, or to `null` after `cancel()`, and rejects with `err.code === 'no-encoder'` when the
+browser can't encode VP9 or VP8. The WebM file itself is written by a small built-in writer: no
+library. Gzip uses the browser's built-in
 CompressionStream, available in Chrome 80+, Firefox 113+ and Safari 16.4+. An exported page sets
 `window.SUMI_PLAYER_READY`, a Promise that resolves once its player has started. `recordWebM` returns
 `{ done, cancel, stream }`, where `done` resolves to a Blob, or to `null` after `cancel()`.
