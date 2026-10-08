@@ -46,7 +46,7 @@ on each build.
 const ctx = canvas.getContext('2d', { willReadFrequently: true }); // same canvas kind for record and replay
 const pen = SUMI.recordStroke(ctx, { tool: 'dry', seed: Math.random(), opts: { size: 40 }, p0: { x, y } });
 pen.dab();                                                    // pointerdown
-pen.segment(from, to, width, direction, { speed, alpha });    // each move
+pen.move({ x, y });                                           // each pointermove
 const stroke = pen.end();                                     // pointerup → JSON-safe record
 SUMI.replay(otherCtx, [stroke], { speed: 2 });                // animated, same pixels at the end
 ```
@@ -68,10 +68,19 @@ The script has no dependencies. `node tests/run.mjs` fails if `dist/` is out of 
 
 ## Recording and replay
 
-Every hand stroke is recorded as plain JSON (`js/recorder.js`, stroke format v2): tool,
-seed, options, wind, start point, the brush-engine version, and every brush call with its
-exact width, direction, speed, transparency, time and call number. Times are ms on one
-session clock, and call numbers break exact ties (e.g. two pens at once). v1 strokes still
+Every hand stroke is recorded as plain JSON (`js/recorder.js`, stroke format v3): tool,
+seed, options, wind, start point, the brush-engine version, and the pointer input, one
+`[x, y, t]` row per move. The pen dynamics in the library (`SUMI.penDynamics`) turn each move
+into brush calls: speed thins and lightens the stroke by the Taper setting, and moves are split
+into ~2.5 px steps. Recording and replay run the same dynamics, so a replay re-derives exactly
+the same calls. The droplets, bristles and grain aren't stored either: the stroke's seed
+regenerates them.
+
+Input is rounded before anything is drawn: positions to 1/100 px, times to 0.1 ms. The live
+stroke is drawn from the stored numbers, so replay stays pixel-identical while the rows stay
+short. A long scribble that took about 785 KB as v2 takes about 38 KB as v3, 15 KB gzipped.
+Times are ms on one session clock. Call numbers break exact ties, e.g. two pens drawing at
+once, and are stored only where another pen's calls came in between. v2 and v1 strokes still
 replay. Undo, Clear, Clear mask and Generate keep the recording in step with what's on the
 canvas. In the console, `SUMI.app.strokes()` returns the records.
 
@@ -83,9 +92,11 @@ Use it in another canvas app with just `js/rng.js` + `js/brushes.js` + `js/recor
 ```js
 const ctx = canvas.getContext('2d', { willReadFrequently: true }); // CPU raster: see below
 const pen = SUMI.recordStroke(ctx, { tool: 'dry', seed: Math.random(), opts: { size: 40 }, p0: { x, y } });
-pen.dab();                                                  // on pointerdown — only before the first segment
-pen.segment(a, b, width, direction, { speed, alpha });      // per move (speed, alpha in 0..1)
+pen.dab();                                                  // on pointerdown — only before the first move
+const { w } = pen.move({ x, y });                           // per pointermove; w = stroke width there
 const stroke = pen.end();                                   // on pointerup → JSON-safe record
+// own pen dynamics instead? use pen.segment(a, b, width, dir, { speed, alpha }) per step:
+// the stroke then stores those calls in full (segs rows), and a pen takes moves or segments, not both
 
 SUMI.replayStroke(otherCtx, JSON.parse(JSON.stringify(stroke))); // same pixels
 
@@ -133,8 +144,8 @@ Three downloads:
 
 | Button | What you get |
 |---|---|
-| **↓ JSON** | The recording as a `sumi-strokes` v1 document: `{ format, v, canvas, paper, strokes }` (each stroke in format v2). Load it back with `SUMI.parseRecording(json)`, which validates the document and every stroke in full via `SUMI.validateStroke`. |
-| **↓ HTML** | One file with `rng.js`, `brushes.js`, `recorder.js` and `playback.js` inlined, plus a small player. It animates the strokes on open at the replay speed and timing picked in the panel; click the canvas to replay. No other files and no network. |
+| **↓ JSON** | The recording as a gzip-compressed `sumi-strokes` v1 document (`.json.gz`): `{ format, v, canvas, paper, strokes }`, each stroke in format v3. Load it back with `await SUMI.readRecording(fileOrBytes)`, which takes `.json.gz` or plain `.json` and validates the document and every stroke in full via `SUMI.validateStroke`. |
+| **↓ HTML** | One file with `rng.js`, `brushes.js`, `recorder.js` and `playback.js` inlined, plus a small player. The recording inside is gzip-compressed and unpacks itself on open. It animates the strokes at the replay speed and timing picked in the panel; click the canvas to replay. No other files and no network. |
 | **↓ WebM** | A video of the replay, recorded in real time at the replay speed (8× makes a short clip). While it records, the button reads **■ stop video**. Needs a browser that records WebM: Chrome, Edge or Firefox. In Safari the button is disabled. |
 
 The HTML player draws the same layers as the app: wash multiplied onto the paper, then
@@ -146,8 +157,12 @@ Exporting works from `file://` too: each core file registers its module function
 `SUMI.modules`, and the export inlines that function's source text instead of fetching the
 files.
 
-From code: `SUMI.recordingJSON(strokes, { canvas })`, `SUMI.standaloneHTML(strokes, { canvas, speed, timing, gap, stagger })`
-and `SUMI.recordWebM(strokes, { canvas, speed, fps })`. `recordWebM` returns
+From code: `SUMI.recordingJSON(strokes, { canvas })` (plain text) and
+`await SUMI.recordingGzip(strokes, { canvas })` (a Blob), `SUMI.standaloneHTML(strokes, { canvas, speed, timing, gap, stagger })`
+(recording as plain JSON inside) and `await SUMI.standaloneHTMLGzip(...)` (compressed inside),
+and `SUMI.recordWebM(strokes, { canvas, speed, fps })`. Gzip uses the browser's built-in
+CompressionStream, available in Chrome 80+, Firefox 113+ and Safari 16.4+. An exported page sets
+`window.SUMI_PLAYER_READY`, a Promise that resolves once its player has started. `recordWebM` returns
 `{ done, cancel, stream }`, where `done` resolves to a Blob, or to `null` after `cancel()`.
 Standalone HTML can only hold the built-in brushes (`SUMI.BRUSH_NAMES`): a stroke from a
 brush you added yourself is rejected with a TypeError.

@@ -22,7 +22,8 @@
     return new Promise((res, rej) => {
       const f = document.createElement('iframe');
       f.style.cssText = 'position:fixed;left:-3000px;top:0;width:800px;height:600px';
-      f.onload = () => { try { res(f.contentWindow.SUMI_PLAYER ? f.contentWindow : null); } catch (e) { e.name === 'SecurityError' ? res(null) : rej(e); } };
+      // a compressed page sets SUMI_PLAYER only once it has unpacked: wait on SUMI_PLAYER_READY
+      f.onload = () => { try { const w = f.contentWindow; res(w.SUMI_PLAYER_READY ? w.SUMI_PLAYER_READY.then(() => w) : null); } catch (e) { e.name === 'SecurityError' ? res(null) : rej(e); } };
       f.srcdoc = html;
       document.body.appendChild(f);
     });
@@ -162,6 +163,33 @@
     // an area nobody can bound (a brush that doesn't report one) redraws everything; none redraws nothing
     P.update(null); T.eq(P.stats.full - full0, 0);
     P.update({ x0: -Infinity, y0: -Infinity, x1: Infinity, y1: Infinity }); T.eq(P.stats.full - full0, 1);
+  });
+
+  T.test('export: the JSON download is gzip-compressed and reads back exactly', async () => {
+    const { strokes } = recording(), json = SUMI.recordingJSON(strokes, { canvas: CANVAS });
+    const blob = await SUMI.recordingGzip(strokes, { canvas: CANVAS });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    T.eq(bytes[0], 0x1f, 'gzip magic'); T.eq(bytes[1], 0x8b, 'gzip magic');
+    T.assert(blob.size < json.length / 2, `${blob.size} bytes compressed from ${json.length}`);
+    const want = JSON.stringify(SUMI.parseRecording(json));
+    for (const input of [blob, bytes, bytes.buffer, json, JSON.parse(json)]) {
+      T.eq(JSON.stringify(await SUMI.readRecording(input)), want, Object.prototype.toString.call(input));
+    }
+    let e = null; try { await SUMI.readRecording(new Uint8Array([0x1f, 0x8b, 1, 2, 3])); } catch (x) { e = x; }
+    T.assert(e, 'a broken gzip file is an error');
+  });
+
+  T.test('export: the compressed HTML player unpacks itself and replays pixel-identically', async () => {
+    const { live, strokes } = recording();
+    const plain = SUMI.standaloneHTML(strokes, { canvas: CANVAS, speed: Infinity });
+    const html = await SUMI.standaloneHTMLGzip(strokes, { canvas: CANVAS, speed: Infinity });
+    T.assert(!html.includes('"tool"'), 'no raw stroke JSON inside');
+    T.assert(html.length < plain.length, `${html.length} vs ${plain.length} characters`);
+    T.assert(!/<script[^>]*\bsrc=|<link\b|https?:\/\//i.test(html), 'still one self-contained file');
+    const w = await loadHTML(html);
+    if (!w) T.skip('iframe blocked on file:// — use node tests/run.mjs');
+    T.eq(await w.SUMI_PLAYER.run.done, true);
+    for (const n of LAYERS) T.eq(T.hash(w.SUMI_PLAYER.layers[n]), T.hash(live[n].canvas), n);
   });
 
   T.test('export: options are checked before writing a file', () => {

@@ -197,6 +197,28 @@ raster and the timings mostly miss it:
 The app starts on Balanced. Its brush cost meter times the current brush on a scratch canvas at
 the board's pixel density, and warns at ≥ 8 ms per 12 px move.
 
+## Stroke format v3 and gzip (done 2026-10-08, branch `feat/stroke-format-v3`)
+
+The user found a single scribble recorded as about 1 MB. v2 stored about 3 rows per mouse
+move, each with 10 full-precision numbers (~141 bytes): positions, width, direction, speed,
+alpha, time and call number, all derived from the input. v3 stores the input instead:
+- `pen.move(p)` records one `[x, y, t]` row per pointer move.
+- The pen dynamics moved from `app.js` into `recorder.js` as `SUMI.penDynamics`: speed
+  smoothing, taper thinning and lightening, ~2.5 px steps. Recording and playback both run
+  them, and `SUMI.strokeCalls(stroke)` gives the derived calls.
+- Input is rounded before use: positions to 1/100 px, times to 0.1 ms. The live stroke is
+  drawn from exactly what's stored.
+- Call numbers are implicit: a move's calls continue the stroke's numbering. A 4th number in a
+  row is stored only when another pen cut in.
+- `pen.segment()` remains for hosts with their own dynamics (v3 `segs` rows, as v2). A pen
+  takes one or the other. v1 and v2 strokes still replay.
+- Measured on one scribble of 1,800 moves: 785 KB as v2, 37.6 KB as v3, 15.2 KB gzipped.
+
+Gzip: `SUMI.recordingGzip` / `SUMI.readRecording` handle `.json.gz` and plain JSON, and
+`SUMI.standaloneHTMLGzip` embeds the recording as base64 gzip that the page unpacks on open,
+with `SUMI_PLAYER_READY` resolving once it plays. The app's JSON and HTML buttons use both.
+The inlined player code (~55 KB) is left uncompressed: compressing it would need eval.
+
 ## Note
 
 The "live console" (`refreshCode`) was only a display and couldn't reproduce a stroke.

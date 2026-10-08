@@ -1,5 +1,7 @@
-// Playback of recorded strokes (format v2, v1 still accepted; see recorder.js). Every recorded
-// call goes on one timeline sorted by time, exact ties broken by the recorded call number;
+// Playback of recorded strokes (format v3; v2 and v1 still accepted; see recorder.js). A pointer
+// stroke's moves become the brush calls the pen dynamics derived from them when it was drawn
+// (SUMI.strokeCalls). Every call goes on one timeline sorted by time, exact ties broken by the
+// recorded call number;
 // seek(t) applies, in that fixed order, every call due by t. Frame timing and speed only change
 // *when* calls happen, never their order or arguments, so an animated replay ends
 // pixel-identical to the live drawing at any speed.
@@ -9,16 +11,16 @@ window.SUMI = window.SUMI || {};
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const brushFor = tool => S.brushes[tool]; // validateStroke has checked it exists
 
-  // a stroke's calls as { abs: time on the session clock, n: call number, kind, i };
-  // times never run backwards within a stroke. v1 times were relative to the stroke's start.
-  function strokeEvents(s) {
-    const v2 = s.v === 2, abs = t => (v2 ? t : s.t0 + t);
+  // a stroke's calls as { abs: time on the session clock, n: call number, kind, i } (i indexes
+  // its rows); times never run backwards within a stroke. v1 times were relative to its start.
+  function strokeEvents(s, rows) {
+    const numbered = s.v >= 2, abs = t => (numbered ? t : s.t0 + t);
     let prev = s.t0;
     const at = t => (prev = Math.max(prev, t));
-    const out = [{ abs: s.t0, n: v2 ? s.n0 : NaN, kind: 'start', i: -1 }];
-    if (s.dab) out.push({ abs: at(abs(s.dab.t)), n: v2 ? s.dab.n : NaN, kind: 'dab', i: -1 });
-    s.segs.forEach((g, i) => out.push({ abs: at(abs(g[8])), n: v2 ? g[9] : NaN, kind: 'seg', i }));
-    if (s.end) out.push({ abs: at(abs(s.end.t)), n: v2 ? s.end.n : NaN, kind: 'end', i: -1 });
+    const out = [{ abs: s.t0, n: numbered ? s.n0 : NaN, kind: 'start', i: -1 }];
+    if (s.dab) out.push({ abs: at(abs(s.dab.t)), n: numbered ? s.dab.n : NaN, kind: 'dab', i: -1 });
+    rows.forEach((g, i) => out.push({ abs: at(abs(g[8])), n: numbered ? g[9] : NaN, kind: 'seg', i }));
+    if (s.end) out.push({ abs: at(abs(s.end.t)), n: numbered ? s.end.n : NaN, kind: 'end', i: -1 });
     return out;
   }
 
@@ -38,7 +40,8 @@ window.SUMI = window.SUMI || {};
     strokes = Array.isArray(strokes) ? strokes : [strokes];
     strokes.forEach(S.validateStroke);
     const ctxFor = typeof target === 'function' ? target : () => target;
-    const evs = strokes.map(strokeEvents);
+    const rows = strokes.map(S.strokeCalls); // each stroke's brush calls
+    const evs = strokes.map((s, i) => strokeEvents(s, rows[i]));
     const custom = startTimes(strokes, evs, timing, finite(gap) ? Math.max(0, gap) : 0, finite(stagger) ? Math.max(0, stagger) : 0);
     const base = strokes.length ? Math.min(...strokes.map(s => s.t0)) : 0;
     const starts = custom || strokes.map(s => s.t0 - base);
@@ -74,7 +77,7 @@ window.SUMI = window.SUMI || {};
       const st = live[s];
       if (kind === 'dab') { st.alpha = stroke.dab.alpha; brush.dab(st, stroke.p0); }
       else if (kind === 'seg') {
-        const [ax, ay, bx, by, w, dir, speed, alpha] = stroke.segs[i];
+        const [ax, ay, bx, by, w, dir, speed, alpha] = rows[s][i];
         st.speed = speed; st.alpha = alpha;
         brush.segment(st, { x: ax, y: ay }, { x: bx, y: by }, w, dir);
       } else { st.alpha = stroke.end.alpha; brush.end(st); live[s] = null; }
@@ -100,7 +103,7 @@ window.SUMI = window.SUMI || {};
     };
   };
 
-  // all at once, exactly the recorded calls (no re-splitting of the path)
+  // all at once: exactly the recorded (or, for pointer strokes, re-derived) calls
   S.replayStroke = (ctx, stroke) => { S.playback(ctx, [stroke]).seek(Infinity); };
 
   // animated: speed 1 = real time, 2 = twice as fast, Infinity = draw immediately

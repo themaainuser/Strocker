@@ -20,7 +20,7 @@ const S = { ...SUMI.defaultOpts(), ...SUMI.QUALITY.balanced, tool: 'dry', wind: 
 const QUALITY_KEYS = Object.keys(SUMI.QUALITY.full);
 
 let layers = null;
-let drawing = false, activeId = null, pen = null, last = null, lastW = 0, lastT = 0, smoothV = 0;
+let drawing = false, activeId = null, pen = null;
 let preview = null, previewBox = null; // speed-line rubber band and the box it covers on the board
 let undoStack = [], undoBudget = UNDO_BYTES;
 let strokes = []; // every hand stroke still on the canvas, as replayable records (js/recorder.js)
@@ -75,8 +75,9 @@ function refreshExport() {
     codeOut.textContent = '// paint something: every stroke is recorded\n// export it as JSON, a standalone HTML file or WebM';
     return;
   }
-  const shown = { ...last, segs: `[${last.segs.length} × [ax, ay, bx, by, w, dir, speed, alpha, t, n]]` };
-  codeOut.textContent = '// last stroke, exactly as recorded (segments elided)\n' + JSON.stringify(shown) +
+  const shown = last.moves ? { ...last, moves: `[${last.moves.length} × [x, y, t]]` }
+    : { ...last, segs: `[${last.segs.length} × [ax, ay, bx, by, w, dir, speed, alpha, t, n]]` };
+  codeOut.textContent = '// last stroke, exactly as recorded (rows elided)\n' + JSON.stringify(shown) +
     '\n\n// replay a recording anywhere (rng.js + brushes.js + recorder.js + playback.js):\n' +
     'SUMI.replay(ctx, SUMI.parseRecording(json).strokes, { speed: 1 })';
 }
@@ -169,29 +170,15 @@ function cursorSize(w) {
   const big = S.tool === 'wash' || S.tool === 'spray' || S.tool === 'shard' || S.tool === 'mask';
   cursor.style.width = cursor.style.height = (big ? w : Math.max(10, w * 0.45)) + 'px';
 }
+// the pen turns each pointer move into brush calls (speed thins and lightens the stroke, see
+// SUMI.penDynamics in recorder.js) and records just the move, so the stroke stays small
 function strokeTo(p) {
-  const now = performance.now();
-  const dt = now - lastT || 16;
-  const dist = Math.hypot(p.x - last.x, p.y - last.y);
-  // speed-reactive core: smoothed px/ms so width and ink glide instead of jitter
-  smoothV += (dist / Math.max(dt, 1) - smoothV) * 0.35;
-  const sn = Math.min(smoothV / 1.6, 1); // 0 = slow, 1 = fast flick
-  const react = S.taper;
-  const target = Math.max(1.5, S.size * (1 - react * 0.8 * sn));
-  const w = lastW + (target - lastW) * 0.4;
-  const steps = Math.max(1, Math.floor(dist / 2.5));
-  const dir = Math.atan2(p.y - last.y, p.x - last.x);
   const tool = pen.stroke.tool; // the stroke's own tool, even if a hotkey switched tools mid-stroke
-  const alpha = tool === 'mask' ? 1 : 1 - react * 0.45 * sn; // fast = lighter ink
-  for (let i = 1; i <= steps; i++) {
-    const t0 = (i - 1) / steps, t1 = i / steps;
-    const a = { x: last.x + (p.x - last.x) * t0, y: last.y + (p.y - last.y) * t0 };
-    const b = { x: last.x + (p.x - last.x) * t1, y: last.y + (p.y - last.y) * t1 };
-    pen.segment(a, b, lastW + (w - lastW) * t1, dir, { speed: sn, alpha });
-  }
+  const moved = pen.move(p);
+  if (!moved) return;
   layers.markArea(pen.takeDirty(), SUMI.brushes[tool].layer); // only the box the brush painted is redrawn
   if (tool === 'lines') {
-    const p0 = pen.stroke.p0, e = SUMI.ink.snapEnd(p0, p, windRad());
+    const p0 = pen.stroke.p0, e = SUMI.ink.snapEnd(p0, moved.p, windRad());
     preview = c => {
       c.strokeStyle = 'rgba(17,19,24,0.6)'; c.lineWidth = 1; c.setLineDash([6, 5]);
       c.beginPath(); c.moveTo(p0.x, p0.y); c.lineTo(e.x, e.y); c.stroke(); c.setLineDash([]);
@@ -200,8 +187,7 @@ function strokeTo(p) {
     previewBox = { x0: Math.min(p0.x, e.x) - 2, y0: Math.min(p0.y, e.y) - 2, x1: Math.max(p0.x, e.x) + 2, y1: Math.max(p0.y, e.y) + 2 };
     layers.markArea(previewBox);
   }
-  cursorSize(w);
-  last = p; lastW = w; lastT = now;
+  cursorSize(moved.w);
 }
 
 // one stroke at a time, from one pointer: extra fingers, other buttons and stray events are
@@ -213,8 +199,7 @@ canvas.addEventListener('pointerdown', e => {
   const layer = SUMI.brushes[S.tool].layer;
   pushUndo([layer]);
   const p = pos(e);
-  last = p; lastW = S.size; lastT = performance.now(); smoothV = 0;
-  // the pen draws and records the exact calls, including the seed, so the stroke can be replayed
+  // the pen draws and records the input, including the seed, so the stroke can be replayed
   pen = SUMI.recordStroke(layers.get(layer).ctx, {
     tool: S.tool, seed: Math.random(), opts: strokeOpts(), wind: windRad(), erase: e.altKey, p0: p,
     origin: sessionStart, canvas: { w: layers.w, h: layers.h, dpr: layers.dpr },
@@ -537,8 +522,9 @@ function exportCanvas() {
 }
 const exportPlayback = () => ({ speed: +$('replaySpeed').value, ...playbackShape($('replayTiming').value) });
 function exportJSON() { return SUMI.recordingJSON(strokes, { canvas: exportCanvas() }); }
+// a Promise: the page carries the recording gzip-compressed and unpacks it on open
 function exportHTML() {
-  return SUMI.standaloneHTML(strokes, { canvas: exportCanvas(), title: 'SUMI strokes · ' + S.seed, ...exportPlayback() });
+  return SUMI.standaloneHTMLGzip(strokes, { canvas: exportCanvas(), title: 'SUMI strokes · ' + S.seed, ...exportPlayback() });
 }
 function exportWebM(extra = {}) {
   if (!strokes.length || videoJob || !CAN_RECORD_VIDEO) return null;
@@ -561,14 +547,20 @@ function exportWebM(extra = {}) {
     });
   return job;
 }
-$('btnExportJSON').onclick = () => {
-  const json = exportJSON();
-  download(new Blob([json], { type: 'application/json' }), fileName('json'));
-  log('export', 'JSON · ' + strokes.length + ' strokes');
+const sizeLabel = bytes => (bytes / 1024).toFixed(1) + ' KB';
+$('btnExportJSON').onclick = async () => {
+  try {
+    const blob = await SUMI.recordingGzip(strokes, { canvas: exportCanvas() }); // read back with SUMI.readRecording
+    download(blob, fileName('json.gz'));
+    log('export', `JSON · ${strokes.length} strokes · ${sizeLabel(blob.size)} gzipped`);
+  } catch (err) { toastMsg('export failed: ' + err.message); }
 };
-$('btnExportHTML').onclick = () => {
-  download(new Blob([exportHTML()], { type: 'text/html' }), fileName('html'));
-  log('export', 'HTML player · ' + strokes.length + ' strokes');
+$('btnExportHTML').onclick = async () => {
+  try {
+    const html = await exportHTML();
+    download(new Blob([html], { type: 'text/html' }), fileName('html'));
+    log('export', `HTML player · ${strokes.length} strokes · ${sizeLabel(html.length)}`);
+  } catch (err) { toastMsg('export failed: ' + err.message); }
 };
 $('btnExportWebM').onclick = () => {
   if (videoJob) { videoJob.cancel(); toastMsg('video stopped'); } else exportWebM();

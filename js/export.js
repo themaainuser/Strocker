@@ -1,6 +1,8 @@
 // Export a recording three ways:
 //   SUMI.recordingJSON / SUMI.parseRecording   the strokes as a validated JSON document
-//   SUMI.standaloneHTML                        one .html file that animates them, no other files
+//   SUMI.recordingGzip / SUMI.readRecording    the same, gzip-compressed (reads either kind back)
+//   SUMI.standaloneHTML / standaloneHTMLGzip   one .html file that animates them, no other files;
+//                                              the Gzip page carries the recording compressed
 //   SUMI.recordWebM                            a video, via canvas.captureStream + MediaRecorder
 // The HTML inlines rng.js + brushes.js + recorder.js + playback.js from the functions those
 // files register in SUMI.modules (the browser keeps their exact source text), so exporting
@@ -30,10 +32,35 @@ window.SUMI = window.SUMI || {};
   const canvasOf = (strokes, canvas) =>
     checkCanvas(canvas || (strokes[0] && strokes[0].canvas) || { w: 800, h: 600, dpr: 1 });
 
+  // gzip via the browser's CompressionStream (Chrome 80+, Firefox 113+, Safari 16.4+)
+  const gzip = text => new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
+  const gunzip = bytes => new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+  function toBase64(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+
   S.recordingJSON = (strokes, { canvas, paper = PAPER } = {}) => {
     strokes.forEach(checkStroke);
     S.ink.parseColor(paper);
     return JSON.stringify({ format: FORMAT, v: VERSION, canvas: canvasOf(strokes, canvas), paper, strokes });
+  };
+
+  // the recording as a gzip-compressed JSON document (a Blob for a .json.gz download)
+  S.recordingGzip = async (strokes, opts = {}) =>
+    new Blob([await gzip(S.recordingJSON(strokes, opts))], { type: 'application/gzip' });
+
+  // reads a recording from JSON text, a parsed object, or the bytes of a .json or .json.gz file
+  // (a Blob, ArrayBuffer or typed array; gzip is recognised by its first two bytes)
+  S.readRecording = async input => {
+    if (typeof input === 'string' || (input && !(input instanceof Blob) && !(input instanceof ArrayBuffer) && !ArrayBuffer.isView(input))) {
+      return S.parseRecording(input);
+    }
+    const buf = input instanceof Blob ? await input.arrayBuffer() : input;
+    const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    const text = bytes[0] === 0x1f && bytes[1] === 0x8b ? await gunzip(bytes) : new TextDecoder().decode(bytes);
+    return S.parseRecording(text);
   };
 
   S.parseRecording = input => {
@@ -124,6 +151,14 @@ window.SUMI = window.SUMI || {};
     return { layers, strokes, stats, composite, update, play, get run() { return run; } };
   }
 
+  // a compressed page's recording: base64 of the gzipped JSON, unpacked on open (inlined as source)
+  async function sumiUnpack(packed) {
+    const bin = atob(packed), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return JSON.parse(await new Response(stream).text());
+  }
+
   // the exported page's entry point (inlined as source)
   function sumiStandalone(S, stage, data, opts) {
     const view = document.getElementById('sumi');
@@ -140,7 +175,8 @@ window.SUMI = window.SUMI || {};
   const scriptSafe = src => src.replace(/<\/(script)/gi, '<\\/$1').replace(/<!--/g, '<\\!--');
   const jsonSafe = value => JSON.stringify(value).replace(/</g, '\\u003c');
 
-  S.standaloneHTML = (strokes, opts = {}) => {
+  // what both kinds of page are built from (checks the options and strokes first)
+  function playerParts(strokes, opts) {
     const { canvas, paper = PAPER, title = 'SUMI strokes', speed = 1, timing = 'recorded', gap = 150, stagger = 0 } = opts;
     checkPlayback({ speed, timing, gap, stagger });
     const missing = CORE.filter(k => !(S.modules && typeof S.modules[k] === 'function'));
@@ -152,6 +188,10 @@ window.SUMI = window.SUMI || {};
     const play = { speed: speed === Infinity ? null : speed, timing, gap, stagger }; // JSON has no Infinity
     const shown = data.strokes.filter(s => S.brushes[s.tool].layer !== 'mask').length; // the player skips mask strokes
     const core = CORE.map(k => '(' + scriptSafe(S.modules[k].toString()) + ')(window.SUMI);').join('\n');
+    return { data, play, shown, core, title };
+  }
+  // `boot` is the script that hands the recording to sumiStart and sets SUMI_PLAYER_READY
+  function playerPage({ play, shown, core, title }, boot) {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -174,14 +214,32 @@ window.SUMI = window.SUMI || {};
 window.SUMI = window.SUMI || {};
 window.SUMI.PAPER = ${jsonSafe(S.PAPER || '#f4f1ea')}; // shard chips are cut from this paper, as when recorded
 ${core}
-const DATA = ${jsonSafe(data)};
 const PLAY = ${jsonSafe(play)};
 if (PLAY.speed === null) PLAY.speed = Infinity;
-(${scriptSafe(sumiStandalone.toString())})(window.SUMI, ${scriptSafe(sumiStage.toString())}, DATA, PLAY);
+const sumiStart = DATA => {
+  (${scriptSafe(sumiStandalone.toString())})(window.SUMI, ${scriptSafe(sumiStage.toString())}, DATA, PLAY);
+  return window.SUMI_PLAYER;
+};
+${boot}
 </script>
 </body>
 </html>
 `;
+  }
+
+  S.standaloneHTML = (strokes, opts = {}) => {
+    const parts = playerParts(strokes, opts);
+    return playerPage(parts, `window.SUMI_PLAYER_READY = Promise.resolve(sumiStart(${jsonSafe(parts.data)}));`);
+  };
+
+  // the same page with the recording gzipped and base64-encoded inside; it unpacks on open
+  S.standaloneHTMLGzip = async (strokes, opts = {}) => {
+    const parts = playerParts(strokes, opts);
+    const packed = toBase64(new Uint8Array(await (await gzip(JSON.stringify(parts.data))).arrayBuffer()));
+    return playerPage(parts, `window.SUMI_PLAYER_READY = (${scriptSafe(sumiUnpack.toString())})(${JSON.stringify(packed)}).then(sumiStart, err => {
+  document.querySelector('p').textContent = 'This browser cannot open this file: ' + err.message;
+  throw err;
+});`);
   };
 
   // real-time capture: plays the recording onto an offscreen stage and records it

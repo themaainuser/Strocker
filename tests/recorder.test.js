@@ -27,13 +27,14 @@
     }
   });
 
-  T.test('recorder: record follows the documented schema (v2)', () => {
+  T.test('recorder: a segment pen follows the documented schema (v3 with segs)', () => {
     const c = T.canvas(W, H), s = record(c.ctx, 'dry', { opts: { size: 30, color: ' #abc ' } });
-    T.eq(s.v, SUMI.STROKE_FORMAT); T.eq(SUMI.STROKE_FORMAT, 2);
+    T.eq(s.v, SUMI.STROKE_FORMAT); T.eq(SUMI.STROKE_FORMAT, 3);
+    T.assert(!('moves' in s), 'segment strokes have no moves');
     T.eq(s.engine, SUMI.BRUSH_ENGINE); T.assert(Number.isInteger(SUMI.BRUSH_ENGINE) && SUMI.BRUSH_ENGINE >= 1, 'engine version');
     T.eq(s.tool, 'dry'); T.eq(s.seed, 0.7316247301); T.eq(s.wind, -0.61); T.eq(s.erase, false);
     T.eq(JSON.stringify(s.opts), JSON.stringify(SUMI.normalizeOpts({ size: 30, color: ' #abc ' })));
-    T.eq(JSON.stringify(s.p0), JSON.stringify({ x: 40.123456789, y: 160.987654321 }));
+    T.eq(JSON.stringify(s.p0), JSON.stringify({ x: 40.12, y: 160.99 }), 'p0 rounded to 1/100 px');
     T.eq(JSON.stringify(s.canvas), JSON.stringify({ w: W, h: H, dpr: 1 }));
     // every time is ms since the caller's origin (clock starts at 1000, origin 900, steps of 16)
     T.eq(s.t0, 100, 't0 = first clock reading − origin');
@@ -52,7 +53,7 @@
     pen.segment({ x: 60, y: 100 }, { x: 64, y: 101 }, 30, 0.2);
     const before = T.hash(a.canvas);
     let err = null; try { pen.dab(); } catch (e) { err = e; }
-    T.assert(err instanceof Error && /before the first segment/.test(err.message), 'error: ' + (err && err.message));
+    T.assert(err instanceof Error && /before the first move or segment/.test(err.message), 'error: ' + (err && err.message));
     T.eq(T.hash(a.canvas), before, 'nothing drawn'); T.eq(pen.stroke.dab, null);
     const s = pen.end(), b = T.canvas(W, H);
     SUMI.replayStroke(b.ctx, JSON.parse(JSON.stringify(s)));
@@ -70,9 +71,10 @@
     T.assert(c.w > 0 && c.h > 0 && c.dpr > 0, JSON.stringify(c));
   });
 
-  T.test('recorder: validateStroke accepts v1 and v2, rejects malformed strokes', () => {
+  T.test('recorder: validateStroke accepts v1, v2 and v3, rejects malformed strokes', () => {
     const good = record(T.canvas(W, H).ctx, 'dry'), copy = () => JSON.parse(JSON.stringify(good));
     SUMI.validateStroke(copy());
+    const v2 = copy(); v2.v = 2; SUMI.validateStroke(v2);
     const v1 = copy(); v1.v = 1; delete v1.engine; delete v1.n0;
     v1.segs = v1.segs.map(g => { const r = g.slice(0, 9); r[8] -= v1.t0; return r; });
     v1.dab = { alpha: 1, t: v1.dab.t - v1.t0 }; v1.end = { alpha: 1, t: v1.end.t - v1.t0 };
@@ -82,7 +84,7 @@
       'null opts': s => { s.opts = null; }, 'NaN wind': s => { s.wind = 'x'; }, 'null segment': s => { s.segs[3] = null; },
       'short segment': s => { s.segs[3] = s.segs[3].slice(0, 8); }, 'string in segment': s => { s.segs[3][4] = '30'; },
       'bad dab': s => { s.dab = { alpha: 'x', t: 1, n: 1 }; }, 'bad end': s => { s.end = { t: 1 }; }, 'bad canvas': s => { s.canvas = { w: 0, h: 1, dpr: 1 }; },
-      'unknown tool': s => { s.tool = 'nope'; }, 'version 3': s => { s.v = 3; },
+      'unknown tool': s => { s.tool = 'nope'; }, 'version 4': s => { s.v = 4; }, 'moves in v2': s => { s.v = 2; s.moves = []; delete s.segs; },
     };
     for (const k in breakers) {
       const s = copy(); breakers[k](s);
@@ -91,11 +93,11 @@
     }
   });
 
-  T.test('recorder: keeps full precision', () => {
+  T.test('recorder: explicit segments keep full precision; p0 is rounded to 1/100 px', () => {
     const pen = SUMI.recordStroke(T.canvas(50, 50).ctx, { tool: 'fine', seed: 1, p0: { x: 1 / 3, y: 2 / 3 } });
     pen.segment({ x: 1 / 3, y: 2 / 3 }, { x: Math.PI, y: Math.E }, 1 / 7, 1 / 9, { speed: 1 / 11, alpha: 1 / 13 });
     const s = JSON.parse(JSON.stringify(pen.end()));
-    T.eq(s.p0.x, 1 / 3);
+    T.eq(s.p0.x, 0.33); T.eq(s.p0.y, 0.67);
     T.eq(JSON.stringify(s.segs[0].slice(0, 8)), JSON.stringify([1 / 3, 2 / 3, Math.PI, Math.E, 1 / 7, 1 / 9, 1 / 11, 1 / 13]));
   });
 
@@ -103,7 +105,7 @@
     for (const tool of ['dry', 'spray', 'fine', 'wash', 'shard', 'mask']) {
       const a = T.canvas(100, 100), pen = SUMI.recordStroke(a.ctx, { tool, seed: 'click', opts: base(), p0: { x: 50, y: 50 } });
       pen.dab(); const s = pen.end();
-      T.eq(s.segs.length, 0); T.assert(s.dab, tool + ' dab recorded');
+      T.eq(SUMI.strokeCalls(s).length, 0); T.assert(s.dab, tool + ' dab recorded');
       T.assert(T.inkCount(T.pixels(a.canvas), 0, 0, 100, 100) > 0, tool + ' click painted nothing');
       const b = T.canvas(100, 100); SUMI.replayStroke(b.ctx, JSON.parse(JSON.stringify(s)));
       T.eq(T.hash(b.canvas), T.hash(a.canvas), tool);

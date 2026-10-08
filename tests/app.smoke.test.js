@@ -129,11 +129,14 @@ T.test('app: JSON and HTML buttons download the recording', async () => {
   a.w.HTMLAnchorElement.prototype.click = function () { got.push(this.download); };
   a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
   d.getElementById('btnExportJSON').click(); d.getElementById('btnExportHTML').click();
-  T.eq(got.length, 2); T.assert(/\.json$/.test(got[0]) && /\.html$/.test(got[1]), got.join());
+  for (let i = 0; i < 100 && got.length < 2; i++) await new Promise(r => setTimeout(r, 20)); // both are compressed first
+  T.eq(got.length, 2);
+  T.assert(got.some(n => /\.json\.gz$/.test(n)) && got.some(n => /\.html$/.test(n)), got.join());
   const doc = SUMI.parseRecording(a.app.exportJSON()), L = a.app.layers;
   T.eq(doc.strokes.length, 1);
+  T.eq(doc.strokes[0].v, 3); T.assert(doc.strokes[0].moves.length > 5, 'recorded as pointer moves');
   T.eq(JSON.stringify(doc.canvas), JSON.stringify({ w: L.w, h: L.h, dpr: L.dpr }));
-  T.assert(a.app.exportHTML().includes('SUMI_PLAYER'), 'html player');
+  T.assert((await a.app.exportHTML()).includes('SUMI_PLAYER'), 'html player');
 });
 T.test('app: WebM button records and downloads a video', async () => {
   if (typeof MediaRecorder === 'undefined') T.skip('no MediaRecorder here');
