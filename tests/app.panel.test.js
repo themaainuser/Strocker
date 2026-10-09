@@ -12,6 +12,21 @@
     }
   });
 
+  // the serif runs wider than the old monospace: check a phone-width panel too
+  T.test('app: the side panel never scrolls sideways at phone width', async () => {
+    const a = await app(), d = a.w.document, panel = d.getElementById('panel');
+    a.w.frameElement.style.width = '375px';
+    void d.body.offsetWidth; // lay out at the new width (test iframes can't count on animation frames)
+    await new Promise(r => setTimeout(r, 0));
+    T.assert(a.w.innerWidth <= 375, 'frame is phone width: ' + a.w.innerWidth);
+    d.getElementById('advanced').open = true;
+    a.app.setTool('wash'); drag(a, line(40, 120, 330, 140));
+    for (const el of [panel, ...panel.querySelectorAll('*')]) {
+      T.assert(el.scrollWidth <= el.clientWidth + 1 || a.w.getComputedStyle(el).overflowX === 'visible',
+        `${el.tagName}${el.id ? '#' + el.id : ''}: ${el.scrollWidth} px of content in ${el.clientWidth} px`);
+    }
+  });
+
   T.test('app: stroke data and the activity log sit behind Advanced, closed by default', async () => {
     const a = await app(), d = a.w.document, adv = d.getElementById('advanced');
     const code = d.getElementById('codeOut'), logEl = d.getElementById('log');
