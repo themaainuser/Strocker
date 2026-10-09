@@ -442,6 +442,7 @@ const QUALITY_UI = {
   washLayers: { opt: v => v, slider: o => o, label: o => String(o) },
   washDetail: { opt: v => v, slider: o => o, label: o => 'max ' + 10 * 2 ** o },
   washEdge: { opt: v => v / 100, slider: o => Math.round(o * 100), label: o => Math.round(S.washLayers * o) + ' of ' + S.washLayers },
+  washSmall: { opt: v => v, slider: o => o, label: o => (o ? 'below ' + o : 'off') },
 };
 for (const k of QUALITY_KEYS) {
   $('s-' + k).oninput = e => { S[k] = QUALITY_UI[k].opt(+e.target.value); updateLabels(); };

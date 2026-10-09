@@ -1,6 +1,6 @@
 /*! SUMI brushes — drop-in build (classic script: global SUMI)
  * Ink brushes (dry, spray, fine, lines, wash, shard, mask) + stroke recorder + replay.
- * Brush engine 3 · stroke format 3 · sources 48c03dcf6600
+ * Brush engine 4 · stroke format 3 · sources 7acdc94835b6
  * Built by tools/build-dist.mjs from js/rng.js, js/brushes.js, js/recorder.js, js/playback.js — edit those, not this file.
  * For pixel-identical replay, record and replay on canvases created with
  * getContext('2d', { willReadFrequently: true }). Docs: README.md "Drop-in file".
@@ -92,8 +92,8 @@ window.SUMI = window.SUMI || {};
   // Version of what these brushes paint. Recordings store it; bump it whenever a change alters
   // the pixels of an existing stroke, or adds options an older engine would ignore (the
   // golden-hash tests are keyed by it). 2 added the spray/wash quality options below; 3 added
-  // opts.paper, the colour shard chips are cut from (before, a page-wide SUMI.PAPER).
-  S.BRUSH_ENGINE = 3;
+  // opts.paper, the colour shard chips are cut from (before, a page-wide SUMI.PAPER); 4 added washSmall.
+  S.BRUSH_ENGINE = 4;
   const ORIGINAL_PAPER = '#f4f1ea'; // the paper every stroke recorded before opts.paper was cut from
   const DAB_CANCEL_PX = 2; // dry brush: travel that turns a click into a drag
 
@@ -104,10 +104,12 @@ window.SUMI = window.SUMI || {};
   //   washLayers    1..6     glaze layers per wash stamp; fewer are each darker, so depth holds
   //   washDetail    2..5     outline detail: at most 10·2^n points per layer (5 = 320)
   //   washEdge      0..1     share of wash layers that get the darker edge line (the main cost)
+  //   washSmall     0..1000  size below which wash stamps get simpler (0: never): fewer layers,
+  //                          ×√(size/washSmall) but at least 2, and 40-point outlines below ~22
   S.QUALITY = Object.freeze({
-    full: Object.freeze({ sprayDensity: 1, sprayGap: 0, washLayers: 6, washDetail: 5, washEdge: 1 }),
-    balanced: Object.freeze({ sprayDensity: 0.8, sprayGap: 4, washLayers: 4, washDetail: 4, washEdge: 0.5 }),
-    fast: Object.freeze({ sprayDensity: 0.5, sprayGap: 6, washLayers: 3, washDetail: 3, washEdge: 0 }),
+    full: Object.freeze({ sprayDensity: 1, sprayGap: 0, washLayers: 6, washDetail: 5, washEdge: 1, washSmall: 0 }),
+    balanced: Object.freeze({ sprayDensity: 0.8, sprayGap: 4, washLayers: 4, washDetail: 4, washEdge: 0.5, washSmall: 34 }),
+    fast: Object.freeze({ sprayDensity: 0.5, sprayGap: 6, washLayers: 3, washDetail: 3, washEdge: 0, washSmall: 34 }),
   });
 
   S.defaultOpts = () => ({
@@ -183,7 +185,7 @@ window.SUMI = window.SUMI || {};
       color: color.trim(), paper: paper.trim(),
       sprayDensity: num(o.sprayDensity, d.sprayDensity, 0.1, 1), sprayGap: num(o.sprayGap, d.sprayGap, 0, 50),
       washLayers: Math.round(num(o.washLayers, d.washLayers, 1, 6)), washDetail: Math.round(num(o.washDetail, d.washDetail, 2, 5)),
-      washEdge: num(o.washEdge, d.washEdge, 0, 1),
+      washEdge: num(o.washEdge, d.washEdge, 0, 1), washSmall: num(o.washSmall, d.washSmall, 0, 1000),
     };
   };
 
@@ -351,12 +353,14 @@ window.SUMI = window.SUMI || {};
   // `detail` is the radius that picks the edge detail (default: r). The wash brush passes one
   // value per stroke, so the outline doesn't jump as a speed-thinned stroke changes width.
   // `q` is the wash brush's quality: maxDepth caps the outline detail, alphaK darkens each layer
-  // to make up for fewer layers, edges is how many layers get the edge line.
-  const WASH_FULL = { maxDepth: 5, alphaK: 1, edges: Infinity };
+  // to make up for fewer layers, edges is how many layers get the edge line, small simplifies
+  // the outlines of small stamps (opts.washSmall).
+  const WASH_FULL = { maxDepth: 5, alphaK: 1, edges: Infinity, small: false };
   function washRaw(ctx, rng, x, y, r, layers, opts, detail = r, q = WASH_FULL) {
     r = Math.max(0.5, r);
     // edge detail scales with size: small dabs don't need 320-vertex outlines
     let baseDepth = detail < 6 ? 1 : detail < 24 ? 2 : 3, layerDepth = detail < 24 ? 1 : 2;
+    if (q.small && detail < 12) baseDepth = 1; // 40-point outlines instead of 80
     while (baseDepth + layerDepth > q.maxDepth) { // smooth the silhouette first, keep the layers apart
       if (baseDepth > 1) baseDepth--; else if (layerDepth > 1) layerDepth--; else break;
     }
@@ -612,16 +616,22 @@ window.SUMI = window.SUMI || {};
     },
   };
 
-  // the wash brush's quality options as washRaw takes them (6 layers is full quality, alphaK 1)
-  const washQuality = o => ({ maxDepth: o.washDetail, alphaK: 6 / o.washLayers, edges: Math.round(o.washLayers * o.washEdge) });
+  // the wash brush's quality options as washRaw takes them (6 layers is full quality, alphaK 1).
+  // A wash smaller than washSmall draws fewer layers, ×√(size/washSmall) but at least 2: small
+  // stamps are close together, so they cost the most per pixel of stroke.
+  const washQuality = o => {
+    const small = o.size < o.washSmall;
+    const layers = small ? Math.max(Math.min(2, o.washLayers), Math.round(o.washLayers * Math.sqrt(o.size / o.washSmall))) : o.washLayers;
+    return { layers, maxDepth: o.washDetail, alphaK: 6 / layers, edges: Math.round(layers * o.washEdge), small };
+  };
   raw.wash = {
     layer: 'wash',
     start(st) { st.carry = 0; },
     segment(st, a, b, w) {
       const o = st.opts, q = washQuality(o);
-      stamp(st, a, b, Math.max(2, 0.4 * w), (x, y) => washRaw(st.ctx, st.rng, x, y, w * 0.55, o.washLayers, o, o.size * 0.55, q));
+      stamp(st, a, b, Math.max(2, 0.4 * w), (x, y) => washRaw(st.ctx, st.rng, x, y, w * 0.55, q.layers, o, o.size * 0.55, q));
     },
-    dab(st, p) { const o = st.opts; washRaw(st.ctx, st.rng, p.x, p.y, o.size * 0.55, o.washLayers, o, o.size * 0.55, washQuality(o)); },
+    dab(st, p) { const o = st.opts, q = washQuality(o); washRaw(st.ctx, st.rng, p.x, p.y, o.size * 0.55, q.layers, o, o.size * 0.55, q); },
     end() {},
   };
 

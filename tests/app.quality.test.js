@@ -1,8 +1,8 @@
 // The app's quality controls for spray and wash, its presets and the brush cost meter.
 // Helpers (app, drag, line) come from app.smoke.test.js.
 (() => {
-  const KEYS = ['sprayDensity', 'sprayGap', 'washLayers', 'washDetail', 'washEdge'];
-  const SLIDERS = { sprayDensity: 's-sprayDensity', sprayGap: 's-sprayGap', washLayers: 's-washLayers', washDetail: 's-washDetail', washEdge: 's-washEdge' };
+  const KEYS = ['sprayDensity', 'sprayGap', 'washLayers', 'washDetail', 'washEdge', 'washSmall'];
+  const SLIDERS = { sprayDensity: 's-sprayDensity', sprayGap: 's-sprayGap', washLayers: 's-washLayers', washDetail: 's-washDetail', washEdge: 's-washEdge', washSmall: 's-washSmall' };
   const activePreset = a => [...a.w.document.querySelectorAll('#qualityPresets button')].filter(b => b.classList.contains('on')).map(b => b.dataset.preset);
 
   T.test('app: quality starts at Balanced and every stroke records it', async () => {
@@ -25,6 +25,16 @@
     T.eq(a.app.strokes()[0].opts.washLayers, 2);
   });
 
+  T.test('app: the small-wash slider sets the size washes simplify below, or turns it off', async () => {
+    const a = await app(), d = a.w.document, el = d.getElementById('s-washSmall'), label = d.getElementById('v-washSmall');
+    el.value = '0'; el.dispatchEvent(new a.w.Event('input'));
+    T.eq(a.app.S.washSmall, 0); T.eq(label.textContent, 'off');
+    el.value = '50'; el.dispatchEvent(new a.w.Event('input'));
+    T.eq(a.app.S.washSmall, 50); T.eq(label.textContent, 'below 50');
+    a.app.setTool('wash'); drag(a, line(100, 300, 400, 300));
+    T.eq(a.app.strokes()[0].opts.washSmall, 50, 'recorded with the stroke');
+  });
+
   T.test('app: preset buttons set every quality control', async () => {
     const a = await app(), d = a.w.document;
     for (const name of ['full', 'fast', 'balanced']) {
@@ -33,6 +43,7 @@
       for (const k of KEYS) T.eq(a.app.S[k], Q[k], `${name}: ${k}`);
       T.eq(JSON.stringify(activePreset(a)), JSON.stringify([name]));
       T.eq(+d.getElementById(SLIDERS.washDetail).value, Q.washDetail, `${name}: slider follows`);
+      T.eq(+d.getElementById(SLIDERS.washSmall).value, Q.washSmall, `${name}: small-wash slider follows`);
     }
   });
 

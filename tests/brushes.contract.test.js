@@ -147,6 +147,7 @@
     1: ENGINE_1,
     2: ENGINE_1, // engine 2 only added the spray/wash quality options: default strokes paint as in 1
     3: ENGINE_1, // engine 3 only added opts.paper, whose default is the paper engines 1 and 2 used
+    4: ENGINE_1, // engine 4 only added opts.washSmall, off by default
   };
   T.test('brushes: golden pixel hashes for this BRUSH_ENGINE (headless raster only)', () => {
     if (!/Headless/.test(navigator.userAgent)) T.skip('pinned to headless software raster; GPU canvases differ');

@@ -3,7 +3,7 @@
 (() => {
   const { base, makeCalls, play } = FIX;
   const W = 320, H = 220;
-  const KEYS = ['sprayDensity', 'sprayGap', 'washLayers', 'washDetail', 'washEdge'];
+  const KEYS = ['sprayDensity', 'sprayGap', 'washLayers', 'washDetail', 'washEdge', 'washSmall'];
   const paint = (tool, opts) => {
     const rec = makeCalls(tool); rec.opts = opts;
     const c = T.canvas(W, H); play(c.ctx, rec); return T.hash(c.canvas);
@@ -18,7 +18,7 @@
     });
     return { ctx: proxy, n, bump };
   }
-  function work(tool, opts) {
+  function work(tool, opts, w = 34) {
     const c = T.canvas(W, H), k = counting(c.ctx);
     const P = Path2D.prototype, saved = { ellipse: P.ellipse, arc: P.arc };
     P.ellipse = function (...a) { k.bump('shape'); return saved.ellipse.apply(this, a); };
@@ -26,7 +26,7 @@
     try {
       const b = SUMI.brushes[tool], st = SUMI.makeStroke(k.ctx, 'work', { ...base(), ...opts }, 0);
       b.start(st, { x: 20, y: 110 });
-      for (let i = 0; i < 40; i++) b.segment(st, { x: 20 + i * 3, y: 110 }, { x: 23 + i * 3, y: 110 }, 34, 0);
+      for (let i = 0; i < 40; i++) b.segment(st, { x: 20 + i * 3, y: 110 }, { x: 23 + i * 3, y: 110 }, w, 0);
       b.end(st);
     } finally { Object.assign(P, saved); }
     return k.n;
@@ -42,15 +42,16 @@
   });
 
   T.test('quality: options are clamped, rounded and kept stable', () => {
-    const o = SUMI.normalizeOpts({ sprayDensity: 5, sprayGap: -3, washLayers: 3.6, washDetail: 9, washEdge: 'x' });
-    T.eq(JSON.stringify(KEYS.map(k => o[k])), JSON.stringify([1, 0, 4, 5, 1]));
-    const low = SUMI.normalizeOpts({ sprayDensity: 0, sprayGap: 1e9, washLayers: 0, washDetail: 0, washEdge: -1 });
-    T.eq(JSON.stringify(KEYS.map(k => low[k])), JSON.stringify([0.1, 50, 1, 2, 0]));
+    const o = SUMI.normalizeOpts({ sprayDensity: 5, sprayGap: -3, washLayers: 3.6, washDetail: 9, washEdge: 'x', washSmall: 5000 });
+    T.eq(JSON.stringify(KEYS.map(k => o[k])), JSON.stringify([1, 0, 4, 5, 1, 1000]));
+    const low = SUMI.normalizeOpts({ sprayDensity: 0, sprayGap: 1e9, washLayers: 0, washDetail: 0, washEdge: -1, washSmall: -1 });
+    T.eq(JSON.stringify(KEYS.map(k => low[k])), JSON.stringify([0.1, 50, 1, 2, 0, 0]));
+    T.eq(SUMI.normalizeOpts({ washSmall: 'x' }).washSmall, 0, 'not a number: off');
     T.eq(JSON.stringify(SUMI.normalizeOpts(o)), JSON.stringify(o), 'normalising twice changes nothing');
   });
 
   T.test('quality: each option changes its own brush and nothing else', () => {
-    const cheaper = { sprayDensity: 0.5, sprayGap: 6, washLayers: 3, washDetail: 2, washEdge: 0.5 };
+    const cheaper = { sprayDensity: 0.5, sprayGap: 6, washLayers: 3, washDetail: 2, washEdge: 0.5, washSmall: 60 }; // the strokes are size 34
     for (const [key, value] of Object.entries(cheaper)) {
       const owner = key.startsWith('spray') ? 'spray' : 'wash';
       for (const tool of FIX.TOOLS) {
@@ -71,11 +72,28 @@
     T.eq(work('wash', { washEdge: 0.5 }).stroke * 2, w.stroke, 'half the edge lines');
   });
 
+  // washSmall: washes smaller than it draw fewer layers (×√(size/washSmall), at least 2) and,
+  // once their outlines would have 80 points, 40 instead. Counts below are worked out by hand.
+  T.test('quality: washSmall simplifies only washes smaller than it', () => {
+    const full = { ...SUMI.QUALITY.full }; // 6 layers, all with edge lines, detail 5
+    for (const size of [34, 40]) {
+      T.eq(paint('wash', { ...base(), size, washSmall: 34 }), paint('wash', { ...base(), size }), 'size ' + size + ' is untouched');
+    }
+    const at = (size, washSmall) => work('wash', { ...full, size, washSmall }, size);
+    // size 12 under 34: 6 × √(12/34) = 3.56 → 4 layers; detail 12 × 0.55 = 6.6 → outlines of 10·2² = 40 points, not 80
+    const was = at(12, 0), now = at(12, 34);
+    T.eq(now.fill * 6, was.fill * 4, '4 of 6 layers filled');
+    T.eq(now.stroke * 6, was.stroke * 4, '4 of 6 edge lines');
+    T.eq(now.lineTo * 6 * 79, was.lineTo * 4 * 39, '40-point outlines instead of 80');
+    // size 4 under 100: 6 × √(4/100) = 1.2 → 1, but never fewer than 2 layers
+    T.eq(at(4, 100).fill * 6, at(4, 0).fill * 2, 'at least 2 layers');
+  });
+
   T.test('quality: presets run from full to fast, and fast strokes replay identically', () => {
     const { full, balanced, fast } = SUMI.QUALITY;
     for (const [lo, hi] of [[balanced, full], [fast, balanced]]) {
       T.assert(lo.sprayDensity <= hi.sprayDensity && lo.sprayGap >= hi.sprayGap && lo.washLayers <= hi.washLayers &&
-        lo.washDetail <= hi.washDetail && lo.washEdge <= hi.washEdge, 'each preset is no heavier than the one above');
+        lo.washDetail <= hi.washDetail && lo.washEdge <= hi.washEdge && lo.washSmall >= hi.washSmall, 'each preset is no heavier than the one above');
     }
     T.assert(Object.isFrozen(full) && Object.isFrozen(SUMI.QUALITY), 'presets are read-only');
     for (const tool of ['spray', 'wash']) {
@@ -93,6 +111,7 @@
   const GOLDEN_FAST = {
     2: { spray: '94a0179d', wash: '06d73067' },
     3: { spray: '94a0179d', wash: '06d73067' }, // engine 3 added opts.paper, which spray and wash don't use
+    4: { spray: '94a0179d', wash: '06d73067' }, // engine 4 added washSmall: 34 in fast, and these strokes are size 34
   };
   T.test('quality: golden pixel hashes for the fast preset (headless raster only)', () => {
     if (!/Headless/.test(navigator.userAgent)) T.skip('pinned to headless software raster; GPU canvases differ');
@@ -100,6 +119,17 @@
     T.assert(want, 'no fast-preset hashes for BRUSH_ENGINE ' + SUMI.BRUSH_ENGINE);
     const got = {};
     for (const tool of ['spray', 'wash']) got[tool] = paint(tool, { ...base(), ...SUMI.QUALITY.fast });
+    T.eq(JSON.stringify(got), JSON.stringify(want));
+  });
+
+  // pins the simpler small wash (balanced: washSmall 34) at sizes 8 and 12
+  const GOLDEN_SMALL_WASH = { 4: { 8: 'd5c5ab30', 12: 'd7a0a923' } };
+  T.test('quality: golden pixel hashes for small balanced washes (headless raster only)', () => {
+    if (!/Headless/.test(navigator.userAgent)) T.skip('pinned to headless software raster; GPU canvases differ');
+    const want = GOLDEN_SMALL_WASH[SUMI.BRUSH_ENGINE];
+    T.assert(want, 'no small-wash hashes for BRUSH_ENGINE ' + SUMI.BRUSH_ENGINE);
+    const got = {};
+    for (const size of [8, 12]) got[size] = paint('wash', { ...base(), ...SUMI.QUALITY.balanced, size });
     T.eq(JSON.stringify(got), JSON.stringify(want));
   });
 })();

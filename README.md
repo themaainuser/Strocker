@@ -112,9 +112,9 @@ SUMI.validateStroke(stroke);                                // throws TypeError 
 
 Notes for a host app:
 - **Errors.** `done` rejects if a brush throws during a replay, instead of staying pending.
-- **Brush engine version.** Each stroke records `SUMI.BRUSH_ENGINE`. It is now 3: engine 2
-  added the spray/wash quality options, and engine 3 added `opts.paper`. Strokes without them
-  paint as in engine 1. If you change a
+- **Brush engine version.** Each stroke records `SUMI.BRUSH_ENGINE`. It is now 4: engine 2
+  added the spray/wash quality options, engine 3 added `opts.paper`, and engine 4 added
+  `washSmall`. Strokes without them paint as in engine 1. If you change a
   brush so that it paints differently, bump that number. Old recordings still replay, but
   with the new pixels.
 - **Paths.** Brushes restore every ctx setting they touch, but they do call
@@ -230,7 +230,7 @@ while typing in the seed field. **↓ PNG** exports paper, all paint layers, gra
 
 ### Quality: spray and wash
 
-Spray and wash take the most time to draw, so five options trade some of their look for
+Spray and wash take the most time to draw, so six options trade some of their look for
 speed. They are brush options like size, recorded with each stroke, so a replay always uses
 the same settings. A stroke that doesn't set them paints at full quality. That includes every
 recording made before these options existed, so those still replay exactly.
@@ -242,9 +242,20 @@ recording made before these options existed, so those still replay exactly.
 | `washLayers` | 1–6 (6) | glaze layers per stamp, each darker when there are fewer | less depth |
 | `washDetail` | 2–5 (5) | outline points per layer, at most 10·2ⁿ (5 = 320) | smoother edges |
 | `washEdge` | 0–1 (1) | share of layers that get the darker edge line, the main wash cost | lighter rim |
+| `washSmall` | 0–1000 (0) | size below which wash stamps get simpler (0: never) | small washes a touch flatter |
 
 `SUMI.QUALITY` holds three presets: `full` (the defaults), `balanced` and `fast`. Use one in
 another project with `opts: { size: 40, ...SUMI.QUALITY.balanced }`.
+
+**Small washes.** Wash stamps sit 0.4 × the width apart, so a thin wash places many more
+stamps per pixel of stroke than a wide one. That made a size-12 wash cost about twice a size-34
+one. Below `washSmall`, a wash draws fewer glaze layers, `washLayers × √(size ÷ washSmall)` but
+at least 2, each darker so the depth holds. Below about size 22, its outlines also drop from
+80 points to 40. Balanced and Fast set it to 34; sizes at or above it paint exactly as before.
+Measured on 2026-10-09 on Balanced, alternating old and new code: a size-12 wash went from
+about 0.9–1.1 ms to 0.25–0.29 ms per move, now cheaper than size 34. Spray was left as it is:
+it throws the same number of drops at every size, so small sprays stay dense and cost about
+the same as medium ones.
 
 Measured per 12 px of painting at size 34 on a desktop PC, at 1× pixel density:
 
@@ -385,6 +396,6 @@ Chrome 154, same laptop):
   strokes played. With one, none did: the slowest frame took 13–15 ms. The app and the exported
   player use it, and WebM export never needed it.
 
-Still open:
-- Small spray and wash are not cheaper. Spray throws the same number of drops at every size,
-  and wash stamps every 0.4 × its width, so a size-12 wash costs more than a size-34 one.
+The third weak spot, small washes costing more than medium ones, is fixed by `washSmall` (see
+Quality above). Small sprays still cost about as much as medium ones. That was a choice: scaling their
+drop count with size made them visibly lighter and sparser.

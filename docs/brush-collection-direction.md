@@ -281,6 +281,33 @@ image with each recording, so the file format is unchanged.
   by hand (`handFrames`, `playByHand`). The deferred-drawing test fakes the costs: a clock that
   moves 0.25 ms per reading, and a read that costs 20 ms.
 
+## Small washes (done 2026-10-09, branch `perf/small-wash`)
+
+The benchmark's third weak spot: small spray and wash weren't cheaper than medium ones. Wash
+stamps sit 0.4 × the width apart, so a thin wash places far more stamps per pixel. On Full, a
+size-12 wash cost about twice a size-34 one. Spray throws the same number of drops at every
+size.
+- **Prototyped first** (throwaway, never in the repo): candidates drawn side by side with their
+  costs. For spray, drop counts scaled with size or area were 3–6× cheaper when small, but
+  visibly lighter and sparser. For wash, wider stamp gaps made small strokes look beaded,
+  and fewer layers alone made them darker and blotchier. Less outline detail plus fewer layers
+  (never below 2) looked closest to the original. The user chose to **leave spray as it is**,
+  and to take that wash fix **as a configurable option**.
+- **`washSmall`**, the sixth quality option: the size below which wash stamps get simpler.
+  Layers become `washLayers × √(size ÷ washSmall)`, at least 2 (or `washLayers` if lower), with
+  alphaK `6 / layers` as for `washLayers`. Below about size 22 (`detail < 12`), outlines drop
+  from 80 points to 40. Full has 0 (off), so a stroke without it, including every older
+  recording, paints as before. Balanced and Fast have 34. `BRUSH_ENGINE` went to 4 (an older
+  engine would ignore the option). The engine-4 golden hashes equal engine 3 for defaults and
+  for Fast at size 34, and new hashes pin small Balanced washes (sizes 8 and 12).
+- **App:** a sixth Quality slider, "Small wash — simpler below size", 0–80, "off" at 0.
+- **Measured** with an A/B in alternating order (old-new-new-old, twice, headless Chrome). On
+  Balanced, a size-12 wash went from 0.89 to 0.25 ms per move at 1× and from 1.13 to 0.29 ms at
+  2×, now cheaper than size 34 (0.43–0.59 ms). Unchanged sizes stayed within this laptop's
+  noise: adjacent runs agree within ~15%, while the machine drifted ~2× over the session. The
+  first A/B ran old before new every time, and that ordering alone made new look 1.3–1.5×
+  slower at untouched sizes.
+
 ## Note
 
 The "live console" (`refreshCode`) was only a display and couldn't reproduce a stroke.
