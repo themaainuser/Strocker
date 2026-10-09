@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SUMI — minimal drop-in example</title>
+<style>
+  body { margin: 0; padding: 16px; background: #0e0e10; color: #ece9e2; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  button, select, .file { background: #1c1c20; color: inherit; border: 1px solid #34343a; border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
+  .file input { display: none; }
+  canvas { display: block; width: 900px; max-width: 100%; height: auto; background: #f8f6f0; touch-action: none; cursor: crosshair; }
+  #status { color: #8b8b90; min-height: 1.5em; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <select id="tool" aria-label="Brush"></select>
+  <label>size <input id="size" type="range" min="4" max="120" value="34" /></label>
+  <button id="replay">Replay</button>
+  <button id="clear">Clear</button>
+  <button id="save">Save</button>
+  <label class="file">Open… <input id="open" type="file" accept=".json,.gz" /></label>
+</div>
+<canvas id="board"></canvas>
+<p id="status">Draw on the paper.</p>
+
+<script type="module">
+// A minimal host for the SUMI brushes: one canvas and the ES-module drop-in, nothing else.
+// Browsers don't load modules from file://, so serve the repo (e.g. python -m http.server)
+// and open /examples/minimal.html.
+import SUMI from '../dist/sumi-brushes.mjs';
+
+const W = 900, H = 560, PAPER = '#f8f6f0'; // board size in CSS px; the canvas's paper colour
+const dpr = window.devicePixelRatio || 1;
+const $ = id => document.getElementById(id);
+const canvas = $('board');
+canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+// a CPU canvas: a replay is pixel-identical only on the same kind of canvas it was drawn on
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // brushes work in CSS px
+// Every brush paints on this one canvas. The app instead gives each brush's `layer` its own
+// canvas and multiplies the wash layer onto the paper under the ink (README, "Rendering").
+
+let strokes = []; // the drawing: finished strokes, plain JSON-safe objects
+let pen = null;   // the stroke being drawn
+let run = null;   // the last replay
+const status = msg => { $('status').textContent = msg; };
+const clearCanvas = () => ctx.clearRect(0, 0, W, H);
+// a replay still drawing jumps to its end, so the canvas always matches `strokes`
+const stopRun = () => { if (run) run.finish(); };
+
+for (const name of SUMI.BRUSH_NAMES) if (name !== 'mask') $('tool').add(new Option(name, name)); // mask is an app aid
+$('tool').value = 'dry';
+
+// ---------- drawing: each stroke is recorded as it is painted ----------
+const at = e => { // pointer position in CSS px of the board, however the canvas is scaled
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+};
+canvas.addEventListener('pointerdown', e => {
+  if (pen || e.button !== 0) return;
+  stopRun();
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic pointers can't be captured */ }
+  pen = SUMI.recordStroke(ctx, {
+    tool: $('tool').value, seed: Math.random(), p0: at(e), canvas: { w: W, h: H, dpr },
+    opts: { ...SUMI.QUALITY.balanced, size: +$('size').value, paper: PAPER },
+  });
+  pen.dab();
+});
+canvas.addEventListener('pointermove', e => { if (pen) pen.move(at(e)); });
+const finish = () => {
+  if (!pen) return;
+  strokes.push(pen.end());
+  pen = null;
+  status(`${strokes.length} stroke${strokes.length === 1 ? '' : 's'}.`);
+};
+addEventListener('pointerup', finish);
+addEventListener('pointercancel', finish);
+
+// ---------- replay ----------
+// 'sequence' replays the strokes in array order, which is the order they were drawn in, even
+// after strokes are added to an opened drawing (their recorded times come from another session).
+// The budget keeps each frame to 12 ms of drawing, so long drawings never freeze the page.
+const replay = speed => SUMI.replay(ctx, strokes, { speed, timing: 'sequence', gap: 150, budget: 12 });
+$('replay').onclick = () => {
+  if (!strokes.length) return status('Nothing to replay yet.');
+  stopRun(); clearCanvas();
+  run = replay(2);
+  run.done.then(ok => { if (ok) status('Replayed.'); });
+};
+$('clear').onclick = () => { stopRun(); strokes = []; clearCanvas(); status('Cleared.'); };
+
+// ---------- save and open ----------
+// the same document the app's "↓ JSON" saves (SUMI.recordingJSON in js/export.js), uncompressed
+const save = () => JSON.stringify({ format: 'sumi-strokes', v: 1, canvas: { w: W, h: H, dpr }, paper: PAPER, strokes });
+$('save').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([save()], { type: 'application/json' }));
+  a.download = 'drawing.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
+// a saved drawing: this page's .json or the app's .json.gz, as text or a Blob (a File is one)
+async function readDrawing(input) {
+  if (typeof input === 'string') return JSON.parse(input);
+  const bytes = new Uint8Array(await input.arrayBuffer());
+  const gzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
+  const text = gzip
+    ? await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text()
+    : new TextDecoder().decode(bytes);
+  return JSON.parse(text);
+}
+// replaces the drawing with a saved one; resolves true once it is drawn, false if it can't be
+// opened (the current drawing is then left as it was). A drawing saved at another board size
+// replays at its recorded coordinates.
+async function open(input) {
+  stopRun();
+  let doc;
+  try {
+    doc = await readDrawing(input);
+    if (!doc || !Array.isArray(doc.strokes)) throw new TypeError('it has no strokes');
+    doc.strokes.forEach(s => SUMI.validateStroke(s)); // check everything before touching the canvas
+  } catch (err) {
+    status(`Can't open that file: ${err.message}`);
+    return false;
+  }
+  strokes = doc.strokes;
+  clearCanvas();
+  status(`Opening ${strokes.length} strokes…`);
+  run = replay(Infinity);
+  const done = await run.done;
+  if (done) status(`Opened ${strokes.length} strokes.`);
+  return done;
+}
+$('open').onchange = e => { const file = e.target.files[0]; e.target.value = ''; if (file) open(file); };
+
+// for the browser console (and the tests): what the buttons use
+window.sumiExample = { canvas, strokes: () => strokes, save, open, lastRun: () => run };
+</script>
+</body>
+</html>

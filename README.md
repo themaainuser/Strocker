@@ -38,10 +38,10 @@ from `dist/`:
 | `dist/sumi-brushes.mjs` | `import SUMI, { recordStroke, replay } from './sumi-brushes.mjs'` | a module with no global |
 
 Both contain `js/rng.js`, `js/brushes.js`, `js/recorder.js` and `js/playback.js`
-unchanged, wrapped by a small build script. In a Web Worker, use one of these files: the
-separate `js/` files expect `window`. They paint exactly the same pixels as the
+unchanged, wrapped by a small build script. They paint exactly the same pixels as the
 separate files: the test runner runs the same library tests, pixel fingerprints included,
-on each build.
+on each build. In a Web Worker, use one of these files: the separate `js/` files expect
+`window`.
 
 ```js
 const ctx = canvas.getContext('2d', { willReadFrequently: true }); // same canvas kind for record and replay
@@ -55,6 +55,16 @@ SUMI.replay(otherCtx, [stroke], { speed: 2 });                // animated, same 
 Tools: `dry`, `spray`, `fine`, `lines`, `wash`, `shard`, `mask` (`SUMI.BRUSH_NAMES`). The
 banner at the top of each file states the brush-engine version, the stroke-format version
 and a hash of the sources it was built from.
+
+**A working example.** `examples/minimal.html` is a whole host in one short file, meant to be
+copied: it imports `dist/sumi-brushes.mjs`, draws on one CPU canvas with a brush picker and a
+size slider, and has Replay, Clear, Save and Open. Save writes the same `sumi-strokes` JSON the
+app exports. Open reads that, or the app's `.json.gz`, checks every stroke before touching the
+canvas, and redraws with `budget: 12` so big drawings don't freeze the page. Replays use
+`timing: 'sequence'`, so strokes added to an opened drawing still replay in the order they were
+drawn. Browsers don't load modules from `file://`, so serve the repo (for example
+`python -m http.server`) and open `/examples/minimal.html`. The test runner drives it like a
+user: it draws, saves, clears and reopens, then checks the pixels match.
 
 **Rebuilding.** Edit the files in `js/`, then run:
 
@@ -333,6 +343,7 @@ tests/standalone.html   brush library without the poster modules
 tests/stroke-fixtures.js   a stroke recorded as plain data + replay helper
 tests/dist*.html   the library tests again, against each drop-in build
 bench/index.html  benchmark page (bench/bench.js); tools/bench.mjs runs it headless
+examples/minimal.html   a whole host on the ES-module drop-in, to copy into another project
 ```
 
 All files are classic scripts on a `window.SUMI` namespace (no ES modules), so the page
@@ -345,7 +356,7 @@ node tests/run.mjs
 ```
 
 The runner opens four pages in headless Edge or Chrome:
-- `tests.html`: everything.
+- `tests.html`: everything, including the app and `examples/minimal.html` driven in iframes.
 - `tests/standalone.html`: the portable library loaded alone (`rng.js` + `brushes.js` +
   `recorder.js` + `playback.js`).
 - `tests/dist.html` and `tests/dist-esm.html`: the same library tests against each
