@@ -29,6 +29,17 @@
     });
   }
 
+  // replays a loaded player with animation frames by hand (offscreen test iframes can't count
+  // on getting them): restarts it under a frame queue, as a click does, and runs every frame
+  async function playByHand(w) {
+    const frames = [];
+    w.requestAnimationFrame = cb => frames.push(cb);
+    const run = w.SUMI_PLAYER.play();
+    const drawnAtOnce = run.timeline.position;
+    for (let n = 0; frames.length && n < 1e5; n++) frames.shift()(w.performance.now());
+    return { drawnAtOnce, done: await run.done };
+  }
+
   T.test('export: core modules register their own source', () => {
     for (const k of ['rng', 'brushes', 'recorder', 'playback']) {
       T.eq(typeof (SUMI.modules && SUMI.modules[k]), 'function', k);
@@ -221,11 +232,13 @@
     for (const k of ['rng', 'brushes', 'recorder', 'playback']) T.assert(html.includes(SUMI.modules[k].toString().slice(0, 40)), k + ' inlined');
   });
 
-  T.test('export: standalone HTML replays the recording pixel-identically', async () => {
+  T.test('export: an instant player replays the recording pixel-identically, a slice per frame', async () => {
     const { live, strokes } = recording();
     const w = await loadHTML(SUMI.standaloneHTML(strokes, { canvas: CANVAS, speed: Infinity }));
     if (!w) T.skip('iframe blocked on file:// — use node tests/run.mjs');
-    T.eq(await w.SUMI_PLAYER.run.done, true);
+    const { drawnAtOnce, done } = await playByHand(w);
+    T.eq(drawnAtOnce, 0, 'nothing drawn in one blocking go');
+    T.eq(done, true);
     for (const n of LAYERS) T.eq(T.hash(w.SUMI_PLAYER.layers[n]), T.hash(live[n].canvas), n);
     const view = w.document.querySelector('canvas'), px = T.pixels(view);
     let inked = 0; for (let i = 0; i < px.data.length; i += 4) if (px.data[i] < 200) inked++;
@@ -295,7 +308,7 @@
     T.assert(!/<script[^>]*\bsrc=|<link\b|https?:\/\//i.test(html), 'still one self-contained file');
     const w = await loadHTML(html);
     if (!w) T.skip('iframe blocked on file:// — use node tests/run.mjs');
-    T.eq(await w.SUMI_PLAYER.run.done, true);
+    T.eq((await playByHand(w)).done, true);
     for (const n of LAYERS) T.eq(T.hash(w.SUMI_PLAYER.layers[n]), T.hash(live[n].canvas), n);
   });
 

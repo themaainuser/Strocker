@@ -185,7 +185,8 @@ window.SUMI = window.SUMI || {};
     const custom = [...new Set(strokes.map(s => s && s.tool))].filter(t => !(S.BRUSH_NAMES || []).includes(t));
     if (custom.length) throw new TypeError('custom brushes can\'t go into a standalone HTML file: ' + custom.join(', '));
     const data = JSON.parse(S.recordingJSON(strokes, { canvas, paper }));
-    const play = { speed: speed === Infinity ? null : speed, timing, gap, stagger }; // JSON has no Infinity
+    // JSON has no Infinity; the player draws at most 12 ms per frame, so big recordings don't freeze it
+    const play = { speed: speed === Infinity ? null : speed, timing, gap, stagger, budget: 12 };
     const shown = data.strokes.filter(s => S.brushes[s.tool].layer !== 'mask').length; // the player skips mask strokes
     const core = CORE.map(k => '(' + scriptSafe(S.modules[k].toString()) + ')(window.SUMI);').join('\n');
     return { data, play, shown, core, title };

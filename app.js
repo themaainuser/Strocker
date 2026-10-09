@@ -13,6 +13,7 @@ const TOOLS = ['dry', 'spray', 'fine', 'lines', 'wash', 'shard', 'mask'];
 const ALL_LAYERS = [...SUMI.LAYER_NAMES, 'mask'];
 const UNDO_LIMIT = 15;
 const UNDO_BYTES = 256 * 1024 * 1024; // undo snapshots are full-size canvases: cap their memory too
+const SLICE_MS = 12; // replays draw at most this many ms per frame, so a big recording never freezes the page
 const newSeed = () => Math.random().toString(36).slice(2, 8);
 
 // spray/wash quality starts at Balanced: close to Full at about half the drawing time
@@ -278,6 +279,15 @@ function cancelRun() {
     setBusy(false);
   }
 }
+// Stop: a replay draws the rest a slice per frame (it stays busy until done, so the canvas ends
+// up matching the recording); anything else is cancelled
+function stopRun() {
+  if (!run || run.finishing) return;
+  if (run.kind !== 'replay') { cancelRun(); return; }
+  run.finishing = true;
+  run.finish({ budget: SLICE_MS });
+  refreshButtons();
+}
 function startRun(r, kind, onDone) {
   r.kind = kind;
   run = r;
@@ -317,7 +327,7 @@ const playbackShape = timing => (timing === 'sequence' ? { timing, gap: 150 } : 
 
 // repaint the recorded strokes, animated (js/playback.js), on top of the generated poster /
 // filled mask if there is one; undoable
-function replay({ speed = +$('replaySpeed').value, timing = $('replayTiming').value } = {}) {
+function replay({ speed = +$('replaySpeed').value, timing = $('replayTiming').value, budget = SLICE_MS } = {}) {
   if (!strokes.length) { toastMsg('nothing recorded yet'); return null; }
   settle();
   pushUndo(ALL_LAYERS);
@@ -326,7 +336,7 @@ function replay({ speed = +$('replaySpeed').value, timing = $('replayTiming').va
   const recs = strokes.slice();
   log('replay', `${recs.length} strokes · ${speed}× · ${timing}`);
   const r = SUMI.replay(s => layers.get(SUMI.brushes[s.tool].layer).ctx, recs,
-    { ...playbackShape(timing), speed, onFrame: tl => layers.markArea(tl.takeDirty(), ...ALL_LAYERS) });
+    { ...playbackShape(timing), speed, budget, onFrame: tl => layers.markArea(tl.takeDirty(), ...ALL_LAYERS) });
   return startRun(r, 'replay', completed => { if (completed) toastMsg('replay done'); });
 }
 function fillMask() {
@@ -358,8 +368,8 @@ function refreshButtons() {
   refreshExport();
   $('btnFillMask').disabled = busy || maskIsEmpty();
   // while busy the replay button is the Stop button, so it stays enabled
-  $('btnReplay').textContent = busy && run && run.finish ? '■ Stop' : '▶ Replay';
-  $('btnReplay').disabled = busy ? !(run && run.finish) : !strokes.length;
+  $('btnReplay').textContent = busy && run && run.finish ? (run.finishing ? '■ finishing…' : '■ Stop') : '▶ Replay';
+  $('btnReplay').disabled = busy ? !(run && run.finish) || !!run.finishing : !strokes.length;
 }
 
 // ---------- UI ----------
@@ -508,7 +518,7 @@ $('btnGenerate').onclick = () => {
 $('btnReroll').onclick = () => { $('seedInput').value = newSeed(); generate(); };
 $('seedInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !busy) generate(); });
 $('btnFillMask').onclick = fillMask;
-$('btnReplay').onclick = () => { if (busy) cancelRun(); else replay(); };
+$('btnReplay').onclick = () => { if (busy) stopRun(); else replay(); };
 $('btnClearMask').onclick = clearMask;
 $('btnPaper').onclick = e => {
   S.paper = !S.paper;

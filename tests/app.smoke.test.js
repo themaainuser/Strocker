@@ -17,6 +17,13 @@ function drag(a, pts, extra = {}) {
   for (const p of pts.slice(1)) ptr(a, 'pointermove', p, extra);
   a.w.dispatchEvent(new a.w.PointerEvent('pointerup', { pointerId: extra.pointerId || 1, pointerType: extra.pointerType || 'mouse', bubbles: true }));
 }
+// animation frames by hand (offscreen test iframes can't count on getting them): queues the
+// page's frames from now on; the returned flush runs them until `until()` holds
+function handFrames(a) {
+  const queue = [];
+  a.w.requestAnimationFrame = cb => queue.push(cb);
+  return until => { for (let i = 0; i < 1e5 && queue.length && !until(); i++) queue.shift()(a.w.performance.now()); };
+}
 const line = (x0, y0, x1, y1, n = 30) => Array.from({ length: n + 1 }, (_, i) => ({ x: x0 + (x1 - x0) * i / n, y: y0 + (y1 - y0) * i / n }));
 const inked = (a, name) => T.inkCount(T.pixels(a.app.layers.get(name).canvas), 0, 0, 1e5, 1e5);
 
@@ -94,15 +101,22 @@ T.test('app: replay repaints the recording exactly and is undoable', async () =>
   const hashes = () => names.map(n => T.hash(L.get(n).canvas)).join();
   a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
   a.app.setTool('wash'); drag(a, line(150, 200, 400, 420));
-  const before = hashes(), depth = a.app.undoDepth();
-  T.eq(await a.app.replay({ speed: Infinity }).done, true);
+  const before = hashes(), depth = a.app.undoDepth(), flush = handFrames(a);
+  const run = a.app.replay({ speed: Infinity });
+  T.eq(run.timeline.position, 0, 'drawn in slices over frames, not in one blocking go');
+  flush(() => !a.app.busy);
+  T.eq(await run.done, true);
   T.eq(hashes(), before); T.eq(a.app.undoDepth(), depth + 1, 'one undo step'); T.assert(!a.app.busy);
 });
-T.test('app: stopping an animated replay jumps to the end', async () => {
+T.test('app: stopping a replay finishes it in slices, then matches the recording', async () => {
   const a = await app(); a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
-  const before = T.hash(a.app.layers.get('ink').canvas);
+  const before = T.hash(a.app.layers.get('ink').canvas), btn = a.w.document.getElementById('btnReplay');
+  const flush = handFrames(a);
   const run = a.app.replay({ speed: 1 }); T.assert(a.app.busy, 'busy while replaying');
-  a.w.document.getElementById('btnReplay').click(); // reads "Stop" while busy
+  btn.click(); // reads "Stop" while busy
+  T.assert(run.timeline.position < run.timeline.total, 'the rest is not drawn in one blocking go');
+  T.assert(a.app.busy && btn.disabled && /finishing/.test(btn.textContent), 'shows it is finishing: ' + btn.textContent);
+  flush(() => !a.app.busy);
   T.eq(await run.done, true); T.assert(!a.app.busy, 'idle again');
   T.eq(T.hash(a.app.layers.get('ink').canvas), before, 'canvas matches the recording');
 });

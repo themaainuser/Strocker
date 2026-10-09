@@ -241,6 +241,46 @@ frame per step. Each frame is drawn, then encoded with WebCodecs `VideoEncoder` 
   SeekHead and Cues point at real elements. Two broken writers were caught: cue positions off
   by one, and every frame flagged as a keyframe.
 
+## Replay in slices (done 2026-10-09, branch `perf/sliced-replay`)
+
+The benchmark (`node tools/bench.mjs`, 2026-10-08) found two weak spots. Drawing a big
+recording at once froze the page: 120 strokes (60,537 calls) took 3.7–4.9 s. And at 8×, 7–11%
+of replay frames went over 16.7 ms. The user chose drawing in slices over saving a snapshot
+image with each recording, so the file format is unchanged.
+- **`budget`** on `SUMI.replay`: ms of drawing per frame. A frame stops once it has drawn that
+  long and leaves the rest to the next frames, so speed becomes a maximum. With a budget,
+  `speed: Infinity` draws over frames as well. `run.finish({ budget })` finishes in slices too,
+  and plain `finish()` still jumps to the end. Without `budget` nothing changes, which the tests
+  and any code that expects an instant replay rely on. `budget: 0` draws one call per frame, so
+  the tests are deterministic.
+- **`timeline.seek(t, deadline)`** stops after the call that passes the deadline. The next seek
+  carries on, even to the same `t`. Before, a seek to a time no later than the last did nothing.
+- **Measuring the drawing as well as the script.** The first version timed only the script,
+  and frames still ran 26–46 ms. A CPU canvas (`willReadFrequently`) records draw calls and
+  rasterises them only when read, which in the app happens later in the frame, in the render
+  loop. So a sliced seek reads one pixel of each CPU canvas it drew on about once per
+  millisecond, and the deferred drawing lands on its clock. GPU canvases rasterise off the main
+  thread and are never read; a test fails if one is. A read changes no pixels, and a tainted
+  canvas is left alone after its first failed read.
+- **The app** replays with 12 ms. **Stop** finishes in slices and shows "■ finishing…". Other
+  actions that interrupt a replay (a stroke, undo, Generate) still complete it at once, so the
+  canvas always matches the recording. **The exported player** uses 12 ms; WebM rendering
+  doesn't, because each video frame must show exactly its own time.
+- **Measured** (headless Chrome 154): the 120 strokes now load in 4.4 s across 261 frames,
+  12.9 ms of drawing per frame on average and at most 15.5 ms. The longest gap between frames
+  was 33 ms. 8× replay frames peak at 13–15 ms, and none go over 16.7 ms. Pixels are identical
+  at 1× and 2×. No brush changed, so `BRUSH_ENGINE` stays 3.
+- **Found while checking it in the app, at 1.25×.** At fractional pixel ratios, Chrome's spray
+  pixels depend on when the canvas is read during drawing. A replay with no read before the end
+  and one read part-way through differed in 27 of ~179,000 inked pixels (0.015%; at 1.5×, 26
+  pixels by at most 2 levels). Dry and wash didn't differ. This predates slicing: the live drawing (undo
+  snapshots, area redraws) and animated replays already read part-way through. So
+  pixel-identical replay also needs an integer pixel ratio, or reads at the same points. The
+  README says so.
+- **Testing.** Test iframes can't count on animation frames, so app and player tests run them
+  by hand (`handFrames`, `playByHand`). The deferred-drawing test fakes the costs: a clock that
+  moves 0.25 ms per reading, and a read that costs 20 ms.
+
 ## Note
 
 The "live console" (`refreshCode`) was only a display and couldn't reproduce a stroke.

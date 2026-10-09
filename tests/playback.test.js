@@ -116,6 +116,102 @@
     T.eq(await r2.done, true, 'finish resolves true');
   });
 
+  // drawing in slices: a big recording must never be drawn in one blocking go when a budget is set
+  T.test('playback: seek(t, deadline) stops once the deadline has passed, and the next call carries on', () => {
+    const { live, strokes } = recording(), c = T.canvas(W, H), tl = SUMI.playback(c.ctx, strokes);
+    T.eq(tl.seek(Infinity, 0), false, 'a deadline already passed stops after one call');
+    T.eq(tl.position, 1);
+    T.eq(tl.seek(Infinity, 0), false);
+    T.eq(tl.position, 2, 'seeking to the same time carries on');
+    T.eq(tl.seek(Infinity), true, 'no deadline draws the rest');
+    T.eq(T.hash(c.canvas), T.hash(live));
+  });
+
+  // A CPU canvas rasterises what was drawn only when something reads it, so a slice timed by
+  // its script alone overruns. Simulated: each clock reading moves 0.25 ms, and a read costs
+  // the 20 ms of drawing the canvas had deferred.
+  function withCosts(ctx, fn) {
+    let clock = 0, reads = 0;
+    const read = ctx.getImageData.bind(ctx);
+    performance.now = () => (clock += 0.25);
+    ctx.getImageData = (...a) => { reads++; clock += 20; return read(...a); };
+    try { return fn(() => reads); } finally { delete performance.now; delete ctx.getImageData; }
+  }
+  T.test('playback: a slice counts the drawing a CPU canvas defers until it is read', () => {
+    const { strokes } = recording(), c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    withCosts(ctx, reads => {
+      const tl = SUMI.playback(ctx, strokes);
+      tl.seek(Infinity, performance.now() + 12);
+      T.assert(reads() > 0, 'the canvas was read during the slice');
+      T.assert(tl.position < 12, 'stops once the deferred drawing has used the budget, after ' + tl.position + ' calls');
+    });
+  });
+  T.test('playback: a slice never reads a GPU canvas', () => {
+    const { live, strokes } = recording(), c = T.canvas(W, H); // no willReadFrequently: may be on the GPU
+    withCosts(c.ctx, reads => {
+      const tl = SUMI.playback(c.ctx, strokes);
+      while (!tl.seek(Infinity, performance.now() + 1e9)); // long slices that would read a CPU canvas often
+      T.eq(reads(), 0);
+    });
+    T.eq(T.hash(c.canvas), T.hash(live));
+  });
+
+  T.test('replay: with a budget, speed Infinity draws over frames, never at once', async () => {
+    const { live, strokes } = recording(), c = T.canvas(W, H), blank = T.hash(c.canvas);
+    const queue = []; let reports = 0;
+    const run = SUMI.replay(c.ctx, strokes, { speed: Infinity, budget: 0, frame: cb => queue.push(cb), onFrame: () => reports++ });
+    T.eq(T.hash(c.canvas), blank, 'nothing drawn before the first frame');
+    let frames = 0;
+    while (queue.length && frames < 1e5) { queue.shift()(); frames++; }
+    T.eq(frames, run.timeline.total, 'budget 0 draws one call per frame');
+    T.eq(reports, frames, 'onFrame after every frame, so a host can redraw what changed');
+    T.eq(T.hash(c.canvas), T.hash(live));
+    T.eq(await run.done, true);
+  });
+
+  T.test('replay: with a budget, a frame that falls behind catches up over the next frames', async () => {
+    const { live, strokes } = recording(), c = T.canvas(W, H);
+    let now = 0; const queue = [];
+    const run = SUMI.replay(c.ctx, strokes, { speed: 8, budget: 0, clock: () => now, frame: cb => queue.push(cb) });
+    now = 1e7; // long past the end: without a budget the next frame would draw everything
+    queue.shift()();
+    T.eq(run.timeline.position, 1, 'one call in that frame');
+    let frames = 1;
+    while (queue.length && frames < 1e5) { queue.shift()(); frames++; }
+    T.eq(frames, run.timeline.total, 'the rest follows one call per frame');
+    T.eq(T.hash(c.canvas), T.hash(live));
+    T.eq(await run.done, true);
+  });
+
+  T.test('replay: finish({ budget }) draws the rest over frames', async () => {
+    const { live, strokes } = recording(), c = T.canvas(W, H);
+    let now = 0; const queue = [];
+    const run = SUMI.replay(c.ctx, strokes, { clock: () => now, frame: cb => queue.push(cb) });
+    now += 16; queue.shift()();
+    const pos = run.timeline.position;
+    run.finish({ budget: 0 });
+    T.eq(run.timeline.position, pos, 'the call itself draws nothing');
+    let frames = 0;
+    while (queue.length && frames < 1e5) { queue.shift()(); frames++; } // the clock stands still: only finish moves it on
+    T.eq(frames, run.timeline.total - pos, 'one call per frame to the end');
+    T.eq(T.hash(c.canvas), T.hash(live));
+    T.eq(await run.done, true);
+  });
+
+  T.test('replay: rejects a budget that is not a number ≥ 0', () => {
+    const { strokes } = recording(), ctx = T.canvas(W, H).ctx;
+    for (const bad of [-1, NaN, '5', null]) {
+      let err = null; try { SUMI.replay(ctx, strokes, { budget: bad, frame: () => {} }); } catch (e) { err = e; }
+      T.assert(err instanceof TypeError, 'budget ' + bad);
+    }
+    const run = SUMI.replay(ctx, strokes, { frame: () => {} });
+    let err = null; try { run.finish({ budget: -1 }); } catch (e) { err = e; }
+    T.assert(err instanceof TypeError, 'finish budget -1');
+    T.eq(run.timeline.position, 0, 'a rejected finish draws nothing');
+  });
+
   T.test('playback: unfinished strokes and out-of-order times are safe; missing numbers are rejected', () => {
     const { strokes } = recording(), s = JSON.parse(JSON.stringify(strokes[1]));
     s.end = null; s.segs[3][8] = -50; s.dab = null;

@@ -243,17 +243,17 @@
     for (const dpr of DPRS) {
       log(`replay frames at ${dpr}x`);
       const rec = session(dpr, 21);
-      for (const speed of [1, 4, 8, Infinity]) {
+      for (const [speed, budget] of [[1], [4], [8], [8, 12], [Infinity], [Infinity, 12]]) {
         const ctx = surface(dpr), tl = S.playback(ctx, rec.strokes), frames = [];
         let t = 0, done = false;
         while (!done) {
           t += MOVE_MS * speed;
           const a = now();
-          done = tl.seek(t); tl.takeDirty(); flush(ctx);
+          done = tl.seek(t, budget === undefined ? Infinity : a + budget); tl.takeDirty(); flush(ctx);
           frames.push(now() - a);
         }
         rows.push({
-          dpr, speed, strokes: rec.strokes.length, length: tl.duration, frames: summary(frames),
+          dpr, speed, budget, strokes: rec.strokes.length, length: tl.duration, frames: summary(frames),
           over16: share(frames, MOVE_MS), identical: hash(ctx) === rec.hash,
         });
         await tick();
@@ -292,7 +292,25 @@
     let tl;
     await timed('playback setup (validate, derive calls, sort)', () => { tl = S.playback(target, strokes); return null; });
     await timed(`replay all at once (${tl.total.toLocaleString('en')} calls)`, () => { tl.seek(Infinity); flush(target); return null; });
-    return { strokes: strokes.length, moves: strokes.reduce((n, s) => n + s.moves.length, 0), steps };
+    log('large recording: drawn in slices on animation frames');
+    const sliced = await inSlices(strokes, 12);
+    return { strokes: strokes.length, moves: strokes.reduce((n, s) => n + s.moves.length, 0), steps, sliced };
+  }
+
+  // the same recording through SUMI.replay with a budget, on real animation frames: how long
+  // loading takes and how long the page goes without a frame
+  async function inSlices(strokes, budget) {
+    if (document.hidden) return { budget, skipped: 'the page is hidden, so it gets no animation frames' };
+    const ctx = surface(1), work = [], stamps = [];
+    const frame = cb => requestAnimationFrame(ts => {
+      stamps.push(ts);
+      const a = now(); cb(); flush(ctx); work.push(now() - a);
+    });
+    const a = now(), run = S.replay(ctx, strokes, { speed: Infinity, budget, frame, onFrame: tl => tl.takeDirty() });
+    const ok = await Promise.race([run.done, new Promise(r => setTimeout(() => r('timeout'), 60000))]);
+    if (ok !== true) { run.cancel(); return { budget, skipped: 'did not finish within 60 s' }; }
+    const gaps = stamps.slice(1).map((t, i) => t - stamps[i]);
+    return { budget, totalMs: now() - a, frames: work.length, work: summary(work), longestGap: Math.max(...gaps) };
   }
 
   // ---------- WebM rendered frame by frame (WebCodecs) ----------
@@ -350,12 +368,19 @@
       R.long.map(r => [r.tool, r.dpr + 'x', r.calls, f(r.live.total, 0), f(r.live.mean), f(r.live.p95), f(r.live.max),
         f(r.first), f(r.last), f(r.end), kb(r.json), kb(r.gzip), f(r.replay, 0), r.identical ? 'yes' : 'NO'])));
     out.push(table('Animated replay: cost per 60 fps frame (21 mixed strokes, balanced)',
-      'Each frame applies every call due by then, as SUMI.replay does. Infinity = draw it all in one go.',
-      ['dpr', 'speed', 'length s', 'frames', 'mean', 'p95', 'max', '> 16.7', 'identical'],
-      R.replays.map(r => [r.dpr + 'x', r.speed === Infinity ? '∞' : r.speed + '×', f(r.length / 1000, 1), r.frames.n,
-        f(r.frames.mean), f(r.frames.p95), f(r.frames.max), pct(r.over16), r.identical ? 'yes' : 'NO'])));
+      'Each frame applies every call due by then, as SUMI.replay does. ∞ = everything is due at once. ' +
+      'budget: ms of drawing per frame, after which the rest waits for the next frames.',
+      ['dpr', 'speed', 'budget', 'length s', 'frames', 'mean', 'p95', 'max', '> 16.7', 'identical'],
+      R.replays.map(r => [r.dpr + 'x', r.speed === Infinity ? '∞' : r.speed + '×', r.budget === undefined ? '–' : r.budget + ' ms',
+        f(r.length / 1000, 1), r.frames.n, f(r.frames.mean), f(r.frames.p95), f(r.frames.max), pct(r.over16), r.identical ? 'yes' : 'NO'])));
     out.push(table(`Large recording: ${R.recording.strokes} strokes, ${R.recording.moves.toLocaleString('en')} moves (1x)`, null,
       ['step', 'ms', 'size'], R.recording.steps.map(s => [s.step, f(s.ms, 1), kb(s.bytes)])));
+    const sl = R.recording.sliced;
+    out.push(sl.skipped ? `## Loading it in slices\nskipped: ${sl.skipped}\n` :
+      table('Loading it in slices: SUMI.replay with speed ∞ and a budget, on real animation frames',
+        'work: ms of drawing in each frame. gap: the longest time between two frames, i.e. the longest the page goes without one.',
+        ['budget', 'total s', 'frames', 'work mean', 'work p95', 'work max', 'longest gap ms'],
+        [[sl.budget + ' ms', f(sl.totalMs / 1000, 1), sl.frames, f(sl.work.mean), f(sl.work.p95), f(sl.work.max), f(sl.longestGap, 1)]]));
     if (R.webm.skipped) out.push(`## WebM\nskipped: ${R.webm.skipped}\n`);
     else {
       out.push(table('WebM rendered frame by frame (8 mixed strokes, 30 fps, speed 1)', null,

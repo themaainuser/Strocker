@@ -3,9 +3,9 @@
 (() => {
   const ALL5 = ['wash', 'scene', 'ink', 'fx', 'mask'];
   const layerHashes = a => ALL5.map(n => T.hash(a.app.layers.get(n).canvas)).join();
-  // the app's own Replay (instant) must reproduce exactly what is on screen
+  // the app's own Replay (instant, all in one go) must reproduce exactly what is on screen
   async function inStep(a) {
-    const before = layerHashes(a), r = a.app.replay({ speed: Infinity, timing: 'recorded' });
+    const before = layerHashes(a), r = a.app.replay({ speed: Infinity, timing: 'recorded', budget: Infinity });
     if (r) await r.done;
     return layerHashes(a) === before;
   }

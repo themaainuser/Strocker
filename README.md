@@ -104,6 +104,9 @@ SUMI.replayStroke(otherCtx, JSON.parse(JSON.stringify(stroke))); // same pixels
 const run = SUMI.replay(ctx, strokes, { speed: 2 });        // or a function stroke => ctx
 await run.done;                                             // run.cancel() stops, run.finish() jumps to the end
 
+// a big recording without freezing the page: at most 12 ms of drawing per frame
+SUMI.replay(ctx, strokes, { speed: Infinity, budget: 12, onFrame: tl => redraw(tl.takeDirty()) });
+
 SUMI.validateStroke(stroke);                                // throws TypeError on anything malformed
 ```
 
@@ -124,6 +127,19 @@ Notes for a host app:
   after each frame and `timeline.takeDirty()` does the same for that frame. The box is
   conservative, so pixels never land outside it. A brush you add yourself that doesn't set
   `reportsArea` gives an infinite box, meaning redraw everything.
+- **Big recordings.** A replay normally draws everything that is due at once, so
+  `speed: Infinity` re-runs every brush call before it returns: 120 strokes took about 3.5 s,
+  with the page frozen. Pass `budget` (ms of drawing per frame) to spread it out instead: each
+  frame stops once it has drawn that long and leaves the rest to the next frames. The page
+  keeps responding, the picture fills in stroke by stroke, and the pixels are the same. At a
+  normal speed a budget caps heavy frames too, so the speed becomes a maximum.
+  `run.finish({ budget: 12 })` draws the rest in slices as well, while `run.finish()` still
+  jumps straight to the end. Without `budget` nothing changes. `budget: 0` draws one call per
+  frame. Driving the timeline yourself, `timeline.seek(t, deadline)` stops after the call that
+  passes `deadline` (a `performance.now()` time), and the next call carries on.
+  A CPU canvas (`willReadFrequently`) does most of its drawing only when something reads it, so
+  a sliced replay reads one pixel of each such canvas about once per millisecond of work. That
+  way the deferred drawing counts against the budget. GPU canvases are never read.
 
 **▶ Replay** in the panel repaints your recorded strokes on a clean sheet, animated. Pick a
 speed (0.5×–8×) and a timing:
@@ -132,7 +148,9 @@ speed (0.5×–8×) and a timing:
 - **all at once**: strokes start together. Where strokes cross, the final pixels can differ,
   because their calls interleave.
 
-**Stop** jumps to the end, so the canvas always matches the recording. Replay is undoable.
+Replays draw at most 12 ms per frame, so even a long recording doesn't freeze the page.
+**Stop** finishes the replay quickly, a slice per frame (the button reads **■ finishing…**), so
+the canvas always matches the recording. Replay is undoable.
 
 Animation frames pause in background tabs, so a replay in a hidden tab waits.
 
@@ -146,7 +164,7 @@ Three downloads:
 | Button | What you get |
 |---|---|
 | **↓ JSON** | The recording as a gzip-compressed `sumi-strokes` v1 document (`.json.gz`): `{ format, v, canvas, paper, strokes }`, each stroke in format v3. Load it back with `await SUMI.readRecording(fileOrBytes)`, which takes `.json.gz` or plain `.json` and validates the document and every stroke in full via `SUMI.validateStroke`. |
-| **↓ HTML** | One file with `rng.js`, `brushes.js`, `recorder.js` and `playback.js` inlined, plus a small player. The recording inside is gzip-compressed and unpacks itself on open. It animates the strokes at the replay speed and timing picked in the panel; click the canvas to replay. No other files and no network. |
+| **↓ HTML** | One file with `rng.js`, `brushes.js`, `recorder.js` and `playback.js` inlined, plus a small player. The recording inside is gzip-compressed and unpacks itself on open. It animates the strokes at the replay speed and timing picked in the panel; click the canvas to replay. It draws at most 12 ms per frame, so a long recording never freezes it. No other files and no network. |
 | **↓ WebM** | A video of the replay at the replay speed (8× makes a short clip), 30 fps, VP9 (VP8 if VP9 isn't available). It is drawn and encoded frame by frame with WebCodecs, so it is smooth however fast your device draws, and usually done faster than real time. A 13 s video at 1200×800 rendered in 1.6 s (8× real time), or in 6.5 s at 2× pixel density. While it renders, the button shows the progress (**■ 45%**); click it to stop. The file has its length and a seek index. Without WebCodecs it falls back to recording in real time (**■ stop**), which needs Chrome, Edge or Firefox; then Safari gets a disabled button. |
 
 The HTML player draws the same layers as the app: wash multiplied onto the paper, then
@@ -177,6 +195,14 @@ A replay is byte-identical to the original only on the same browser engine and t
 kind of canvas. Create canvases with `{ willReadFrequently: true }`: CPU and GPU canvases
 antialias differently, and the browser may move a GPU canvas to the CPU after a pixel
 readback. The app's paint layers are CPU canvases for this reason.
+
+At a fractional pixel ratio (Windows at 125% or 150%), there is one more condition. Chrome's
+spray pixels then depend on when the canvas is read during drawing. Measured on 2026-10-09 at
+1.25×: a replay drawn without a read before the end and one read part-way through differed in 27
+of about 179,000 inked pixels (0.015%), all of them spray. Dry and wash were identical. The live
+drawing, an animated replay and a replay with a `budget` each read part-way through, at
+different moments, so they can differ from each other by as much. At 1× and 2× all of them are
+byte-identical.
 
 ## Brushes
 
@@ -334,8 +360,10 @@ counted. The report covers:
 - the app's cost meter, checked against the Quality table above
 - one 1,800-move stroke per brush: cost at its start and end, recording size, and whether a
   replay matches the live pixels
-- 21 mixed strokes replayed frame by frame at 1×, 4×, 8× and all at once
-- 120 strokes through every export and import path
+- 21 mixed strokes replayed frame by frame at 1×, 4×, 8× and all at once, with and without
+  a 12 ms budget
+- 120 strokes through every export and import path, then loaded in 12 ms slices on real
+  animation frames
 - WebM rendered frame by frame at 1× and 2×
 
 Measured on 2026-10-08 on a laptop (Intel i5-11400H) in headless Edge 154. The same page ran
@@ -348,10 +376,15 @@ Measured on 2026-10-08 on a laptop (Intel i5-11400H) in headless Edge 154. The s
 - Exporting 120 strokes takes under 35 ms in every format. WebM renders 6× faster than real
   time at 1× and about 2× at 2×.
 
-Known weak spots:
-- At 8× replay speed, 7% (1×) to 11% (2×) of frames take longer than 16.7 ms while spray
-  strokes play. At 4× it is under 0.5%. WebM export is unaffected.
-- Drawing a recording all at once re-runs every brush call: 120 strokes (60,537 calls) took
-  3.7–4.9 s, and the page doesn't respond meanwhile.
+Two weak spots found then are fixed by the replay `budget` (measured 2026-10-09, headless
+Chrome 154, same laptop):
+- **Loading a big recording.** Drawn all at once, 120 strokes (60,537 calls) froze the page
+  for about 3.5 s. With a 12 ms budget they fill in over 4.4 s across 261 frames. Each frame
+  draws 12.9 ms on average and at most 15.5 ms, and the longest gap between two frames was 33 ms.
+- **Fast replays.** Without a budget, 5–7% of frames at 8× took longer than 16.7 ms while spray
+  strokes played. With one, none did: the slowest frame took 13–15 ms. The app and the exported
+  player use it, and WebM export never needed it.
+
+Still open:
 - Small spray and wash are not cheaper. Spray throws the same number of drops at every size,
   and wash stamps every 0.4 × its width, so a size-12 wash costs more than a size-34 one.
