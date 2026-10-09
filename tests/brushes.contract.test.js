@@ -4,6 +4,23 @@
   const W = 320, H = 220;
   const painted = c => T.inkCount(T.pixels(c), 0, 0, c.width, c.height);
 
+  // before, some brushes crashed with an unrelated error and others painted
+  T.test('brushes: segment, dab or end before start throws a TypeError and draws nothing', () => {
+    for (const tool of TOOLS) {
+      for (const call of ['segment', 'dab', 'end']) {
+        const c = T.canvas(W, H), blank = T.hash(c.canvas), st = SUMI.makeStroke(c.ctx, 1, base()), b = SUMI.brushes[tool];
+        let err = null;
+        try {
+          if (call === 'segment') b.segment(st, { x: 10, y: 10 }, { x: 160, y: 90 }, 30, 0.5);
+          else if (call === 'dab') b.dab(st, { x: 60, y: 60 });
+          else b.end(st);
+        } catch (e) { err = e; }
+        T.assert(err instanceof TypeError && /start/.test(err.message), `${tool}.${call}: ${err ? err.message : 'no error'}`);
+        T.eq(T.hash(c.canvas), blank, `${tool}.${call} drew nothing`);
+      }
+    }
+  });
+
   T.test('replay: recorded calls survive JSON and repaint identically on a used canvas', () => {
     for (const tool of TOOLS) {
       const rec = makeCalls(tool);

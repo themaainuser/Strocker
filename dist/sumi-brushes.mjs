@@ -1,6 +1,6 @@
 /*! SUMI brushes — drop-in build (ES module: no global)
  * Ink brushes (dry, spray, fine, lines, wash, shard, mask) + stroke recorder + replay.
- * Brush engine 4 · stroke format 3 · sources 7acdc94835b6
+ * Brush engine 4 · stroke format 3 · sources 55b016467a08
  * Built by tools/build-dist.mjs from js/rng.js, js/brushes.js, js/recorder.js, js/playback.js — edit those, not this file.
  * For pixel-identical replay, record and replay on canvases created with
  * getContext('2d', { willReadFrequently: true }). Docs: README.md "Drop-in file".
@@ -12,9 +12,16 @@ const scope = { SUMI: {} };
 // these so the same seed always paints the same picture.
 window.SUMI = window.SUMI || {};
 (function sumiRng(S) {
+  // a seed is a finite number or a string; anything else has an ambiguous string form (every
+  // object would be '[object Object]', so all object seeds would paint alike)
+  const checkSeed = seed => {
+    if (typeof seed === 'string' || (typeof seed === 'number' && Number.isFinite(seed))) return seed;
+    throw new TypeError('seed must be a finite number or a string, got ' + (typeof seed === 'number' ? seed : seed === null ? 'null' : typeof seed));
+  };
+
   // FNV-1a over the seed's string form, then a murmur3 finalizer for avalanche
   S.hashSeed = function (seed) {
-    const str = String(seed);
+    const str = String(checkSeed(seed));
     let h = 0x811c9dc5;
     for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
     h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b);
@@ -43,11 +50,11 @@ window.SUMI = window.SUMI || {};
 
   // value noise on a 256-cell lattice, smoothstep-interpolated, outputs in [0, 1]
   S.makeNoise = function (seed) {
-    const rng = S.makeRng('noise:' + seed);
-    const perm = new Uint8Array(512), vals = new Float32Array(256);
+    const rng = S.makeRng('noise:' + checkSeed(seed));
+    const perm = new Uint8Array(256), vals = new Float32Array(256); // every lookup wraps at 256
     const p = Array.from({ length: 256 }, (_, i) => i);
     for (let i = 255; i > 0; i--) { const j = Math.floor(rng.next() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
-    for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+    perm.set(p);
     for (let i = 0; i < 256; i++) vals[i] = rng.next();
 
     const smooth = t => t * t * (3 - 2 * t);
@@ -707,6 +714,10 @@ window.SUMI = window.SUMI || {};
     st.dirty = d ? { x0: Math.min(d.x0, r.x0), y0: Math.min(d.y0, r.y0), x1: Math.max(d.x1, r.x1), y1: Math.max(d.y1, r.y1) } : r;
   };
 
+  const started = new WeakSet(); // strokes whose brush.start has run
+  const mustHaveStarted = (st, name, call) => {
+    if (!started.has(st)) throw new TypeError(`${name}.${call}: start the stroke first with brushes.${name}.start(st, p)`);
+  };
   function guard(brush, name) {
     const run = (st, fn) => {
       const c = st.ctx;
@@ -720,8 +731,10 @@ window.SUMI = window.SUMI || {};
       start(st, p) {
         if (!finitePt(p)) throw new TypeError('start point must have finite x and y');
         run(st, () => brush.start(st, p));
+        started.add(st);
       },
       segment(st, a, b, w, dir) {
+        mustHaveStarted(st, name, 'segment');
         if (!finitePt(a) || !finitePt(b)) return;
         w = Number.isFinite(w) ? Math.max(0, w) : 0;
         dir = Number.isFinite(dir) ? dir : Math.atan2(b.y - a.y, b.x - a.x);
@@ -730,12 +743,14 @@ window.SUMI = window.SUMI || {};
         grow(st, r);
       },
       dab(st, p) {
+        mustHaveStarted(st, name, 'dab');
         if (!finitePt(p)) return;
         const r = extent('dab', st, p);
         run(st, () => brush.dab(st, p));
         grow(st, r);
       },
       end(st) {
+        mustHaveStarted(st, name, 'end');
         const r = extent('end', st);
         run(st, () => brush.end(st));
         grow(st, r);

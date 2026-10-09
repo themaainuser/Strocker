@@ -626,6 +626,10 @@ window.SUMI = window.SUMI || {};
     st.dirty = d ? { x0: Math.min(d.x0, r.x0), y0: Math.min(d.y0, r.y0), x1: Math.max(d.x1, r.x1), y1: Math.max(d.y1, r.y1) } : r;
   };
 
+  const started = new WeakSet(); // strokes whose brush.start has run
+  const mustHaveStarted = (st, name, call) => {
+    if (!started.has(st)) throw new TypeError(`${name}.${call}: start the stroke first with brushes.${name}.start(st, p)`);
+  };
   function guard(brush, name) {
     const run = (st, fn) => {
       const c = st.ctx;
@@ -639,8 +643,10 @@ window.SUMI = window.SUMI || {};
       start(st, p) {
         if (!finitePt(p)) throw new TypeError('start point must have finite x and y');
         run(st, () => brush.start(st, p));
+        started.add(st);
       },
       segment(st, a, b, w, dir) {
+        mustHaveStarted(st, name, 'segment');
         if (!finitePt(a) || !finitePt(b)) return;
         w = Number.isFinite(w) ? Math.max(0, w) : 0;
         dir = Number.isFinite(dir) ? dir : Math.atan2(b.y - a.y, b.x - a.x);
@@ -649,12 +655,14 @@ window.SUMI = window.SUMI || {};
         grow(st, r);
       },
       dab(st, p) {
+        mustHaveStarted(st, name, 'dab');
         if (!finitePt(p)) return;
         const r = extent('dab', st, p);
         run(st, () => brush.dab(st, p));
         grow(st, r);
       },
       end(st) {
+        mustHaveStarted(st, name, 'end');
         const r = extent('end', st);
         run(st, () => brush.end(st));
         grow(st, r);

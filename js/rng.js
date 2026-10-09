@@ -2,9 +2,16 @@
 // these so the same seed always paints the same picture.
 window.SUMI = window.SUMI || {};
 (function sumiRng(S) {
+  // a seed is a finite number or a string; anything else has an ambiguous string form (every
+  // object would be '[object Object]', so all object seeds would paint alike)
+  const checkSeed = seed => {
+    if (typeof seed === 'string' || (typeof seed === 'number' && Number.isFinite(seed))) return seed;
+    throw new TypeError('seed must be a finite number or a string, got ' + (typeof seed === 'number' ? seed : seed === null ? 'null' : typeof seed));
+  };
+
   // FNV-1a over the seed's string form, then a murmur3 finalizer for avalanche
   S.hashSeed = function (seed) {
-    const str = String(seed);
+    const str = String(checkSeed(seed));
     let h = 0x811c9dc5;
     for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
     h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b);
@@ -33,11 +40,11 @@ window.SUMI = window.SUMI || {};
 
   // value noise on a 256-cell lattice, smoothstep-interpolated, outputs in [0, 1]
   S.makeNoise = function (seed) {
-    const rng = S.makeRng('noise:' + seed);
-    const perm = new Uint8Array(512), vals = new Float32Array(256);
+    const rng = S.makeRng('noise:' + checkSeed(seed));
+    const perm = new Uint8Array(256), vals = new Float32Array(256); // every lookup wraps at 256
     const p = Array.from({ length: 256 }, (_, i) => i);
     for (let i = 255; i > 0; i--) { const j = Math.floor(rng.next() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
-    for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+    perm.set(p);
     for (let i = 0; i < 256; i++) vals[i] = rng.next();
 
     const smooth = t => t * t * (3 - 2 * t);

@@ -314,16 +314,33 @@ The "live console" (`refreshCode`) was only a display and couldn't reproduce a s
 **Done:** it is replaced by the recording & export panel, which shows the last stroke as
 actually stored.
 
-## Deferred (minor review items, not yet done)
+## Deferred minor review items (all settled 2026-10-09, branch `fix/minor-review`)
 
-- Use `globalThis` instead of `window`, for Workers / OffscreenCanvas. (Done for the drop-in
-  files: the build passes `globalThis` in as `window`. The separate `js/` files still use `window`.)
+None of these changed a pixel, so `BRUSH_ENGINE` stays 4 and every recording replays as before.
+- **`globalThis` instead of `window`: closed, no change.** The drop-in files already work in
+  Workers (the build passes `globalThis` in as `window`). The `js/` files keep `window`, because
+  the build relies on that name to keep the ES module free of globals. The README says to use
+  `dist/` in a Worker.
 - ~~Pass the paper colour as `opts.paper` instead of reading the page-wide paper.~~ Done
   2026-10-08 (brush engine 3), with the app's paper colour options; the default paper is pearl
   white (`#f8f6f0`).
-- `stamp()` can place a stamp behind the segment start when the spacing shrinks.
-- The shard's tint fill still runs under its drop shadow.
-- Calling `segment` before `start` throws for some brushes.
-- Document `layer` as a compositing hint.
-- Half of the noise permutation table is never used.
-- Object seeds all hash to `'[object Object]'`.
+- **`stamp()` places a stamp behind the segment start when the spacing shrinks: kept, as
+  intended.** Measured over 8 wash strokes per size: 8–32 such stamps, at most 0.17 px behind.
+  Clamping them shifts every later stamp, and changed about 35% of wash pixels in the
+  measurement. That would repaint every recording for no visible gain. The painted-area box
+  already covers the carried distance.
+- **The shard's tint fill also casts the drop shadow: kept, as the shard's look.** The shadow is
+  drawn twice, so it is a little darker. Fixing it changed about half of all shard pixels, by up
+  to 42 levels, which is a visible change to every recorded shard.
+- **Calling `segment`, `dab` or `end` before `start`: fixed.** Before, `dry.segment`, `fine.segment`
+  and `lines.end` crashed with an unrelated error, and the other calls painted or did nothing. Now every brush
+  throws a `TypeError` naming the missing `start`, and draws nothing. The guard keeps a WeakSet
+  of started strokes, so the stroke object gets no new field.
+- **Document `layer` as a compositing hint: done** (README, "Notes for a host app").
+- **Half of the noise permutation table was never used: fixed.** It is 256 entries now; every
+  lookup already wrapped at 256. The values are unchanged, and the golden noise vectors pass.
+- **Object seeds all hashed to `'[object Object]'`: fixed.** `hashSeed`, `makeRng` and
+  `makeNoise` accept only a finite number or a string and throw a `TypeError` otherwise. That is
+  the rule `recordStroke` already had, and everything in the repo already passed one.
+- Also: `tools/bench.mjs` now falls back to the next browser when one can't open the page
+  (Edge mid-update, during this session), as `tests/run.mjs` does.

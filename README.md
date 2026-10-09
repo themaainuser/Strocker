@@ -38,7 +38,8 @@ from `dist/`:
 | `dist/sumi-brushes.mjs` | `import SUMI, { recordStroke, replay } from './sumi-brushes.mjs'` | a module with no global |
 
 Both contain `js/rng.js`, `js/brushes.js`, `js/recorder.js` and `js/playback.js`
-unchanged, wrapped by a small build script. They paint exactly the same pixels as the
+unchanged, wrapped by a small build script. In a Web Worker, use one of these files: the
+separate `js/` files expect `window`. They paint exactly the same pixels as the
 separate files: the test runner runs the same library tests, pixel fingerprints included,
 on each build.
 
@@ -112,6 +113,14 @@ SUMI.validateStroke(stroke);                                // throws TypeError 
 
 Notes for a host app:
 - **Errors.** `done` rejects if a brush throws during a replay, instead of staying pending.
+- **Seeds and call order.** A seed is a finite number or a string; anything else throws a
+  `TypeError` (`String()` of an object is always `'[object Object]'`, so every object seed
+  painted alike). Driving a brush directly, call `start` first: `segment`, `dab` and `end`
+  throw a `TypeError` before it and draw nothing.
+- **Layers.** Each brush has a `layer`: `wash`, `ink`, `fx` (shards) or `mask`. It is only a
+  hint for hosts that composite separate layers the way the app does: wash multiplied onto
+  the paper, then ink, then fx on top. Mask strokes are an authoring aid; the exported player
+  leaves them out. Brushes never read it, so drawing every stroke on one canvas works too.
 - **Brush engine version.** Each stroke records `SUMI.BRUSH_ENGINE`. It is now 4: engine 2
   added the spray/wash quality options, engine 3 added `opts.paper`, and engine 4 added
   `washSmall`. Strokes without them paint as in engine 1. If you change a
@@ -359,6 +368,8 @@ The runner serves the repo locally and opens `bench/index.html` in headless Edge
 in real time (the test runner uses virtual time, which would freeze the clock). The page is
 cross-origin isolated, so `performance.now()` ticks in 5 µs steps instead of 100 µs. A run
 takes about 90 s and prints the report; `--json results.json` also saves the raw numbers.
+A browser that can't open the page, such as Edge in the middle of an update, hands over to
+the next one, as in the test runner; `SUMI_BROWSER` sets the one to try first.
 Opened through any local server, `bench/index.html` shows the same report on the page, with
 the coarser clock.
 

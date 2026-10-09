@@ -23,6 +23,16 @@ T.test('hashSeed: stable uint32, distinguishes inputs', () => {
   T.assert(SUMI.hashSeed('a') !== SUMI.hashSeed('b'));
   const h = SUMI.hashSeed(42); T.assert(Number.isInteger(h) && h >= 0 && h <= 0xffffffff);
 });
+// String(seed) used to make every object seed the same '[object Object]' sequence
+T.test('rng: a seed must be a finite number or a string', () => {
+  for (const bad of [{}, { a: 1 }, [], null, undefined, NaN, Infinity, true]) {
+    for (const [name, fn] of [['makeRng', SUMI.makeRng], ['makeNoise', SUMI.makeNoise], ['hashSeed', SUMI.hashSeed]]) {
+      let err = null; try { fn(bad); } catch (e) { err = e; }
+      T.assert(err instanceof TypeError, `${name}(${JSON.stringify(bad) ?? String(bad)})`);
+    }
+  }
+  T.eq(typeof SUMI.makeRng(0).next(), 'number'); T.eq(typeof SUMI.makeNoise('').n1(0.5), 'number');
+});
 T.test('noise: range, continuity, determinism', () => {
   const n = SUMI.makeNoise(3), m = SUMI.makeNoise(3), r = SUMI.makeRng(1);
   for (let i = 0; i < 500; i++) {
