@@ -9,8 +9,8 @@ the folder (`npx serve .` / `python -m http.server`).
 
 ## Generate a poster
 
-1. Type a seed (any word) or press **⟳ Reroll** for a random one.
-2. Press **✦ Generate**. It paints step by step. Press it again to cancel.
+1. Type a seed (any word) or press **Reroll** for a random one.
+2. Press **Generate**. It paints step by step. Press it again to cancel.
 3. The same seed, mask and window size always give the same picture.
 
 | Control | What it does |
@@ -160,7 +160,7 @@ Notes for a host app:
   a sliced replay reads one pixel of each such canvas about once per millisecond of work. That
   way the deferred drawing counts against the budget. GPU canvases are never read.
 
-**▶ Replay** in the panel repaints your recorded strokes on a clean sheet, animated. Pick a
+**Replay** in the panel repaints your recorded strokes on a clean sheet, animated. Pick a
 speed (0.5×–8×) and a timing:
 - **as drawn**: keeps your pauses.
 - **back to back**: drops the pauses between strokes.
@@ -168,7 +168,7 @@ speed (0.5×–8×) and a timing:
   because their calls interleave.
 
 Replays draw at most 12 ms per frame, so even a long recording doesn't freeze the page.
-**Stop** finishes the replay quickly, a slice per frame (the button reads **■ finishing…**), so
+**Stop** finishes the replay quickly, a slice per frame (the button reads **Finishing…**), so
 the canvas always matches the recording. Replay is undoable.
 
 Animation frames pause in background tabs, so a replay in a hidden tab waits.
@@ -182,9 +182,9 @@ Three downloads:
 
 | Button | What you get |
 |---|---|
-| **↓ JSON** | The recording as a gzip-compressed `sumi-strokes` v1 document (`.json.gz`): `{ format, v, canvas, paper, strokes }`, each stroke in format v3. Load it back with `await SUMI.readRecording(fileOrBytes)`, which takes `.json.gz` or plain `.json` and validates the document and every stroke in full via `SUMI.validateStroke`. |
-| **↓ HTML** | One file with `rng.js`, `brushes.js`, `recorder.js` and `playback.js` inlined, plus a small player. The recording inside is gzip-compressed and unpacks itself on open. It animates the strokes at the replay speed and timing picked in the panel; click the canvas to replay. It draws at most 12 ms per frame, so a long recording never freezes it. No other files and no network. |
-| **↓ WebM** | A video of the replay at the replay speed (8× makes a short clip), 30 fps, VP9 (VP8 if VP9 isn't available). It is drawn and encoded frame by frame with WebCodecs, so it is smooth however fast your device draws, and usually done faster than real time. A 13 s video at 1200×800 rendered in 1.6 s (8× real time), or in 6.5 s at 2× pixel density. While it renders, the button shows the progress (**■ 45%**); click it to stop. The file has its length and a seek index. Without WebCodecs it falls back to recording in real time (**■ stop**), which needs Chrome, Edge or Firefox; then Safari gets a disabled button. |
+| **JSON** | The recording as a gzip-compressed `sumi-strokes` v1 document (`.json.gz`): `{ format, v, canvas, paper, strokes }`, each stroke in format v3. Load it back with `await SUMI.readRecording(fileOrBytes)`, which takes `.json.gz` or plain `.json` and validates the document and every stroke in full via `SUMI.validateStroke`. |
+| **HTML** | One file with `rng.js`, `brushes.js`, `recorder.js` and `playback.js` inlined, plus a small player. The recording inside is gzip-compressed and unpacks itself on open. It animates the strokes at the replay speed and timing picked in the panel; click the canvas to replay. It draws at most 12 ms per frame, so a long recording never freezes it. No other files and no network. |
+| **WebM** | A video of the replay at the replay speed (8× makes a short clip), 30 fps, VP9 (VP8 if VP9 isn't available). It is drawn and encoded frame by frame with WebCodecs, so it is smooth however fast your device draws, and usually done faster than real time. A 13 s video at 1200×800 rendered in 1.6 s (8× real time), or in 6.5 s at 2× pixel density. While it renders, the button shows the progress (**Stop · 45%**); click it to stop. The file has its length and a seek index. Without WebCodecs it falls back to recording in real time (**Stop**), which needs Chrome, Edge or Firefox; then Safari gets a disabled button. |
 
 The HTML player draws the same layers as the app: wash multiplied onto the paper, then
 ink, then shards. Its layer pixels match the app's in the same browser. Mask strokes are
@@ -245,7 +245,7 @@ were cut from, and replays stay exact. A stroke without `opts.paper` (recorded b
 existed) uses `#f4f1ea`, as it did then. `layers.setPaper(color)` recolours a layer stack.
 
 Shortcuts: `1–7` brush · `[` `]` size · `Ctrl+Z` undo (up to 15 steps or 256 MB of snapshots). Shortcuts are ignored
-while typing in the seed field. **↓ PNG** exports paper, all paint layers, grain and the stamp.
+while typing in the seed field. **Save PNG** exports paper, all paint layers, grain and the stamp.
 
 ### Quality: spray and wash
 
@@ -286,10 +286,17 @@ Measured per 12 px of painting at size 34 on a desktop PC, at 1× pixel density:
 **In the app**, the **Quality** panel has the presets and a slider for each option. It
 starts on Balanced; once a slider moves off a preset, it reads "custom". The meter in the
 panel's heading shows the current brush's drawing time, measured on your device whenever a
-setting changes: green under 4 ms per move, yellow under 8 ms, amber from 8 ms. From 8 ms,
+setting changes: moss under 4 ms per move, ochre under 8 ms, rust from 8 ms. From 8 ms,
 painting may stutter. An alert then appears in the panel naming the settings to lower, with a
-short pop-up when you first cross the line. Both are styled after shadcn/ui's Alert: an amber
-triangle icon (Lucide `triangle-alert`) and title, with the details in muted text.
+short pop-up when you first cross the line. Both look like a note pinned in the margin: a rust edge, a rust
+triangle icon (Lucide `triangle-alert`) and title, with the details in darker ink.
+
+**The look (Washi).** The panel is paper too: cream, a book-style serif, small-caps headings
+over thin ink rules, square controls, and one seal red for Generate and the 墨 mark. Brush
+icons are kanji (筆 brush, 霧 mist, 線 line, 疾 swift, 滲 bleed, 片 fragment, 覆 cover). It uses
+fonts already on the computer (Iowan Old Style, Palatino or Georgia), so the app still works
+offline; a test checks that nothing loads from the network. Design:
+`docs/superpowers/specs/2026-10-09-washi-ui-design.md`.
 
 ## Rendering
 
