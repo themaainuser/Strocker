@@ -34,7 +34,7 @@ html,body{height:100%;background:#e6dece;color:var(--ink);font-family:var(--seri
 .brush-grid button:last-child{grid-column:span 2}
 .brush-grid button{background:transparent;border:1px solid var(--rule-2);color:var(--ink);padding:8px 10px;border-radius:2px;cursor:pointer;font:inherit;font-size:13px;display:flex;gap:9px;align-items:center}
 .brush-grid button span{font-size:15px;width:16px;text-align:center}
-.brush-grid button:hover{border-color:var(--ink);background:rgba(27,26,23,.04)}
+.brush-grid button:not(.active):hover{border-color:var(--ink);background:rgba(27,26,23,.04)}
 .brush-grid button.active{background:var(--ink);border-color:var(--ink);color:var(--panel)}
 .brush-grid button i{font-style:italic;color:var(--muted);font-size:11px;margin-left:auto}
 .brush-grid button.active i{color:rgba(242,236,224,.7)}
@@ -64,7 +64,7 @@ input[type=range]::-moz-range-thumb{width:10px;height:10px;background:var(--ink)
 /* buttons */
 .btn-row{display:flex;gap:8px}
 button.ghost{background:transparent;border:1px solid var(--rule-2);color:var(--ink);padding:7px 10px;border-radius:2px;cursor:pointer;font:inherit;font-size:13px;flex:1}
-button.ghost:hover:not(:disabled){border-color:var(--ink);background:rgba(27,26,23,.04)}
+button.ghost:not(.on):hover:not(:disabled){border-color:var(--ink);background:rgba(27,26,23,.04)}
 button.ghost.on{background:var(--ink);border-color:var(--ink);color:var(--panel)}
 button.ghost.danger{color:var(--seal)}
 button.solid{background:var(--seal);border:1px solid var(--seal);color:var(--seal-ink);padding:8px 12px;border-radius:2px;cursor:pointer;font:inherit;font-size:14px;font-variant:small-caps;letter-spacing:.14em;flex:1}

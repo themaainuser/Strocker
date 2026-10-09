@@ -49,6 +49,26 @@
     a.app.showCost(1);
   });
 
+  // A selected button is inked with cream text: a hover style that repaints its background
+  // would leave cream on cream. Scripts can't put an element in :hover, so each hover rule is
+  // checked with :hover removed: it must not match a selected (.on / .active) button.
+  T.test('washi: hovering a selected button keeps it inked', async () => {
+    const a = await app(), d = a.w.document;
+    const selected = [...d.querySelectorAll('#panel button.on, #panel button.active')];
+    T.assert(selected.length >= 3, 'selected buttons to check: ' + selected.length); // brush, preset, paper grain
+    let hoverRules = 0;
+    for (const sheet of d.styleSheets) for (const rule of sheet.cssRules) {
+      if (!rule.selectorText || !rule.selectorText.includes(':hover') || !rule.style.background && !rule.style.backgroundColor) continue;
+      hoverRules++;
+      for (const sel of rule.selectorText.split(',')) {
+        if (!sel.includes(':hover')) continue;
+        const resting = sel.replace(/:hover/g, '');
+        for (const el of selected) T.assert(!el.matches(resting), `"${sel.trim()}" repaints the selected ${el.id || el.textContent.trim()}`);
+      }
+    }
+    T.assert(hoverRules > 0, 'found the hover rules');
+  });
+
   T.test('washi: the panel uses the serif already on the computer', async () => {
     const a = await app();
     const family = a.w.getComputedStyle(a.w.document.body).fontFamily;
