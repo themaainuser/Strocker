@@ -41,7 +41,7 @@ const strokeOpts = () => ({
 });
 
 // ---------- feedback ----------
-// { warn: true } shows the pop-up as an alert, like the cost warning: amber icon and title
+// { warn: true } shows the pop-up as an alert, like the cost warning: rust icon and title
 function toastMsg(m, { warn = false } = {}) {
   toast.classList.toggle('alert', warn);
   toast.classList.toggle('warn', warn);
@@ -75,7 +75,7 @@ function refreshExport() {
   const vb = $('btnExportWebM'), pct = Math.round((videoProgress || 0) * 100);
   vb.disabled = videoJob ? false : !n || !canMakeVideo();
   // short labels keep the button on one line; the spoken label says what a click does
-  vb.textContent = !videoJob ? '↓ WebM' : videoProgress == null ? '■ stop' : `■ ${pct}%`;
+  vb.textContent = !videoJob ? 'WebM' : videoProgress == null ? 'Stop' : `Stop · ${pct}%`;
   if (videoJob) vb.setAttribute('aria-label', videoProgress == null ? 'Stop recording the video' : `Stop the video (${pct}% rendered)`);
   else vb.removeAttribute('aria-label');
   if (!n) {
@@ -256,7 +256,7 @@ function clearPreview() {
 function setBusy(b) {
   busy = b;
   const generating = b && run && run.kind === 'generate';
-  $('btnGenerate').textContent = generating ? '■ Cancel' : '✦ Generate';
+  $('btnGenerate').textContent = generating ? 'Cancel' : 'Generate';
   $('btnGenerate').disabled = b && !generating; // during a replay, Replay's own button is the Stop
   $('btnReroll').disabled = b;
   refreshButtons();
@@ -368,7 +368,7 @@ function refreshButtons() {
   refreshExport();
   $('btnFillMask').disabled = busy || maskIsEmpty();
   // while busy the replay button is the Stop button, so it stays enabled
-  $('btnReplay').textContent = busy && run && run.finish ? (run.finishing ? '■ finishing…' : '■ Stop') : '▶ Replay';
+  $('btnReplay').textContent = busy && run && run.finish ? (run.finishing ? 'Finishing…' : 'Stop') : 'Replay';
   $('btnReplay').disabled = busy ? !(run && run.finish) || !!run.finishing : !strokes.length;
 }
 

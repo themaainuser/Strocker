@@ -22,9 +22,9 @@
       <label class="section-title" for="seedInput">Generate — seeded poster</label>
       <div class="row">
         <input type="text" id="seedInput" spellcheck="false" autocomplete="off" aria-label="Seed" />
-        <button id="btnReroll" class="ghost fit" title="New seed, then generate">⟳ Reroll</button>
+        <button id="btnReroll" class="ghost fit" title="New seed, then generate">Reroll</button>
       </div>
-      <button id="btnGenerate" class="solid wide">✦ Generate</button>
+      <button id="btnGenerate" class="solid wide">Generate</button>
       <div class="ctl"><div class="ctl-head"><label for="s-wind">Wind <i>slash angle</i></label><b id="v-wind">-35°</b></div><input type="range" id="s-wind" min="-80" max="80" value="-35" /></div>
       <label class="check"><input type="checkbox" id="chkInkEdge" checked /> Ink mask edge</label>
       <div class="row btn-row">
@@ -36,13 +36,13 @@
     <div class="section">
       <label class="section-title">Brush — press 1-7</label>
       <div class="brush-grid" id="brushGrid">
-        <button data-brush="dry" class="active"><span>🖌</span>Dry brush</button>
-        <button data-brush="spray"><span>✸</span>Spray</button>
-        <button data-brush="fine"><span>✎</span>Fine line</button>
-        <button data-brush="lines"><span>╱</span>Speed lines</button>
-        <button data-brush="wash"><span>◍</span>Wash</button>
-        <button data-brush="shard"><span>◇</span>Shard</button>
-        <button data-brush="mask"><span>◐</span>Mask <i>alt = erase</i></button>
+        <button data-brush="dry" class="active"><span>筆</span>Dry brush</button>
+        <button data-brush="spray"><span>霧</span>Spray</button>
+        <button data-brush="fine"><span>線</span>Fine line</button>
+        <button data-brush="lines"><span>疾</span>Speed lines</button>
+        <button data-brush="wash"><span>滲</span>Wash</button>
+        <button data-brush="shard"><span>片</span>Shard</button>
+        <button data-brush="mask"><span>覆</span>Mask <i>alt = erase</i></button>
       </div>
     </div>
 
@@ -106,7 +106,7 @@
           <option value="overlap">all at once</option>
         </select>
       </div>
-      <button id="btnReplay" class="ghost wide" disabled>▶ Replay</button>
+      <button id="btnReplay" class="ghost wide" disabled>Replay</button>
     </div>
 
     <div class="section">
@@ -124,11 +124,11 @@
       </div>
       <div class="row btn-row">
         <button id="btnPaper" class="ghost on">Paper grain: on</button>
-        <button id="btnUndo" class="ghost">↩ Undo</button>
+        <button id="btnUndo" class="ghost">Undo</button>
       </div>
       <div class="row btn-row">
         <button id="btnClear" class="ghost danger">Clear</button>
-        <button id="btnSave" class="ghost">↓ PNG</button>
+        <button id="btnSave" class="ghost">Save PNG</button>
       </div>
     </div>
 
@@ -136,9 +136,9 @@
       <label class="section-title">recording & export <span id="fps">60 fps</span></label>
       <div class="rec-head"><b id="recCount">0 strokes</b><span>stroke format v3</span></div>
       <div class="row btn-row">
-        <button id="btnExportJSON" class="ghost" disabled title="The recording as gzip-compressed JSON (.json.gz, v3 strokes); load it with SUMI.readRecording">↓ JSON</button>
-        <button id="btnExportHTML" class="ghost" disabled title="One HTML file that replays the strokes, nothing else needed">↓ HTML</button>
-        <button id="btnExportWebM" class="ghost" disabled title="A video of the replay at the replay speed, drawn frame by frame (recorded in real time where the browser lacks WebCodecs)">↓ WebM</button>
+        <button id="btnExportJSON" class="ghost" disabled title="The recording as gzip-compressed JSON (.json.gz, v3 strokes); load it with SUMI.readRecording">JSON</button>
+        <button id="btnExportHTML" class="ghost" disabled title="One HTML file that replays the strokes, nothing else needed">HTML</button>
+        <button id="btnExportWebM" class="ghost" disabled title="A video of the replay at the replay speed, drawn frame by frame (recorded in real time where the browser lacks WebCodecs)">WebM</button>
       </div>
       <details class="advanced" id="advanced">
         <summary>Advanced · stroke data &amp; activity log</summary>

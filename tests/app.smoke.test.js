@@ -115,10 +115,31 @@ T.test('app: stopping a replay finishes it in slices, then matches the recording
   const run = a.app.replay({ speed: 1 }); T.assert(a.app.busy, 'busy while replaying');
   btn.click(); // reads "Stop" while busy
   T.assert(run.timeline.position < run.timeline.total, 'the rest is not drawn in one blocking go');
-  T.assert(a.app.busy && btn.disabled && /finishing/.test(btn.textContent), 'shows it is finishing: ' + btn.textContent);
+  T.assert(a.app.busy && btn.disabled && /^Finishing…$/.test(btn.textContent), 'shows it is finishing: ' + btn.textContent);
   flush(() => !a.app.busy);
   T.eq(await run.done, true); T.assert(!a.app.busy, 'idle again');
   T.eq(T.hash(a.app.layers.get('ink').canvas), before, 'canvas matches the recording');
+});
+// Washi: plain words, no symbols (Windows' serif fonts lack ▶ ■ ↓), in every state a button goes through
+T.test('app: buttons use plain words in every state', async () => {
+  const a = await app(), d = a.w.document, text = id => d.getElementById(id).textContent;
+  T.eq([...d.querySelectorAll('#brushGrid button span')].map(s => s.textContent).join(''), '筆霧線疾滲片覆', 'kanji brush icons');
+  T.eq(text('btnGenerate'), 'Generate');
+  T.eq(text('btnReroll'), 'Reroll'); T.eq(text('btnUndo'), 'Undo'); T.eq(text('btnSave'), 'Save PNG');
+  a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
+  T.eq(text('btnReplay'), 'Replay');
+  T.eq(text('btnExportJSON'), 'JSON'); T.eq(text('btnExportHTML'), 'HTML'); T.eq(text('btnExportWebM'), 'WebM');
+  const flush = handFrames(a), run = a.app.replay({ speed: 1 });
+  T.eq(text('btnReplay'), 'Stop', 'while replaying');
+  d.getElementById('btnReplay').click();
+  T.eq(text('btnReplay'), 'Finishing…', 'after Stop');
+  flush(() => !a.app.busy);
+  await run.done;
+  T.eq(text('btnReplay'), 'Replay', 'idle again');
+  a.app.generate({ animate: true });
+  T.eq(text('btnGenerate'), 'Cancel', 'while generating');
+  a.app.cancel();
+  T.eq(text('btnGenerate'), 'Generate', 'after cancelling');
 });
 T.test('app: replay needs a recording; its pickers do not steal hotkeys', async () => {
   const a = await app(), btn = a.w.document.getElementById('btnReplay');
@@ -158,7 +179,7 @@ T.test('app: WebM button records and downloads a video', async () => {
   a.w.HTMLAnchorElement.prototype.click = function () { got.push(this.download); };
   a.app.setTool('dry'); drag(a, line(100, 400, 500, 200));
   const job = a.app.exportWebM({ speed: Infinity, hold: 50 });
-  T.assert(!btn.disabled && btn.textContent.startsWith('■') && /stop/i.test(btn.getAttribute('aria-label') || ''),
+  T.assert(!btn.disabled && /^Stop/.test(btn.textContent) && /stop/i.test(btn.getAttribute('aria-label') || ''),
     'button becomes Stop while making the video: ' + btn.textContent + ' / ' + btn.getAttribute('aria-label'));
   T.assert(btn.scrollHeight <= btn.clientHeight + 1 && btn.getBoundingClientRect().height < 40, 'label stays on one line');
   T.assert(await T.busy(job.done), 'got a video');
